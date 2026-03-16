@@ -4,11 +4,12 @@ description: Development agents for this project (Planner, Coder, Reviewer)
 
 ## Development Agents
 
-This project defines three development agents to help structure work:
+This project defines four development agents to help structure work:
 
 - **Planner**: Designs features, breaks down tasks, and clarifies requirements.
 - **Coder**: Implements code changes following the plan and project conventions.
 - **Reviewer**: Reviews changes for correctness, simplicity, and consistency.
+ - **Build & Run**: Builds, deploys, and validates the full system end-to-end.
 
 ### Planner Agent
 
@@ -64,9 +65,32 @@ This project defines three development agents to help structure work:
   - Suggest minimal changes to reach production-quality.
   - Prefer small, iterative improvements over large rewrites.
 
+### Build & Run Agent
+
+- **Goal**: Validate that the integrated system still works after changes are reviewed.
+- **Responsibilities**:
+  - Prepare a clean, reproducible execution environment before running any tests:
+    - Detect and stop any running backend or frontend processes (e.g. FastAPI/`uvicorn`, Streamlit) that are using project resources.
+    - With explicit user consent, terminate those processes to avoid port and file-lock conflicts.
+    - Clean up stale artefacts such as old SQLite databases (e.g. `finance.db` with an out-of-date schema), cached test data, and temporary files.
+  - Build the entire project (backend, frontend, ingestion, and auxiliary tools) using the documented project commands.
+  - Deploy or start all required services (e.g. API server, database migrations, Streamlit dashboard) in a representative environment.
+  - Run the full end-to-end test suite, including:
+    - Automated tests (unit, integration, and e2e where defined).
+    - Any scripted smoke checks for ingestion, categorisation, and dashboard flows.
+  - Collect logs and test artefacts that are useful for diagnosing failures.
+  - Produce a concise summary report that clearly states:
+    - Overall status (pass/fail).
+    - Which build, deploy, or test steps failed (if any).
+    - Links or paths to key logs, artefacts, or dashboards for further inspection.
+- **Style**:
+  - Prefer deterministic, repeatable commands that can be run locally and in CI.
+  - Fail fast on critical build/deploy errors, but continue gathering as much test and log information as is practical.
+  - Keep the summary report short and actionable, focusing on what changed and what broke (if anything).
+
 ### How to Use These Agents
 
-- For **new features**: start with the **Planner**, then switch to **Coder**, then **Reviewer**.
-- For **small fixes**: the **Coder** may implement directly but the **Reviewer** should still validate.
-- When in doubt, prefer simpler designs and keep the MVP spirit of this project.
+- For **new features**: start with the **Planner**, then switch to **Coder**, then **Reviewer**, and finally run the **Build & Run** agent to validate the full system.
+- For **small fixes**: the **Coder** may implement directly but the **Reviewer** should still validate; run the **Build & Run** agent when the change could reasonably impact build, deployment, or cross-component behaviour.
+- When in doubt, prefer simpler designs and keep the MVP spirit of this project, but still rely on the **Build & Run** agent before shipping meaningful changes.
 

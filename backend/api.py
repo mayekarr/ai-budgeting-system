@@ -38,11 +38,11 @@ class TransactionOut(BaseModel):
     merchant: str | None
     amount: float
     category: str | None
-     subcategory: str | None = None
-     currency: str | None = None
-     account_id: str | None = None
-     confidence_score: float | None = None
-     created_at: str | None = None
+    subcategory: str | None = None
+    currency: str | None = None
+    account_id: str | None = None
+    confidence_score: float | None = None
+    created_at: str | None = None
 
     class Config:
         orm_mode = True
