@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest
 
 from frontend.categories import ALL_CATEGORIES
+
+_DASHBOARD_PATH = Path(__file__).resolve().parent.parent / "frontend" / "dashboard.py"
 
 
 def _fake_all_transactions(*args, **kwargs):
@@ -31,7 +34,10 @@ def _open_drill_in() -> AppTest:
     # Loaded through the real multipage entrypoint (dashboard.py) + switch_page, matching how a
     # user actually reaches this page (and how tests/test_frontend_overview.py now loads Overview),
     # rather than AppTest.from_file("frontend/pages/2_Category_Drill_in.py") in isolation.
-    at = AppTest.from_file("frontend/dashboard.py", default_timeout=15)
+    #
+    # Path is absolute (see tests/test_frontend_overview.py for why): AppTest's relative-path
+    # resolution differs across streamlit versions, so an absolute path sidesteps that entirely.
+    at = AppTest.from_file(str(_DASHBOARD_PATH), default_timeout=15)
     at.run()
     at.switch_page("pages/2_Category_Drill_in.py")
     return at

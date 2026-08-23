@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest
 
 from frontend.categories import ALL_CATEGORIES
+
+_DASHBOARD_PATH = Path(__file__).resolve().parent.parent / "frontend" / "dashboard.py"
 
 
 def _fake_summary(*args, **kwargs):
@@ -27,7 +30,12 @@ def _open_overview() -> AppTest:
     # page registry, so st.page_link's target-page lookup throws (KeyError: 'url_pathname') even
     # though the real app never hits that — a false positive that earlier tests here didn't catch
     # since none asserted `at.exception`. This mirrors how a user actually reaches the page.
-    at = AppTest.from_file("frontend/dashboard.py", default_timeout=15)
+    #
+    # Path is absolute, not the relative "frontend/dashboard.py" this used to pass: AppTest's
+    # relative-path resolution differs across streamlit versions (some try cwd first, some only
+    # ever resolve against the calling test file's own directory) — an absolute path sidesteps
+    # that ambiguity entirely instead of depending on which behaviour happens to be installed.
+    at = AppTest.from_file(str(_DASHBOARD_PATH), default_timeout=15)
     at.run()
     at.switch_page("pages/1_Overview.py")
     return at
