@@ -82,7 +82,7 @@ off. Not built now; noted here so it's not reinvented from scratch when the time
 | Code | Default implementation, with `tdd-workflow` auto-triggering for `backend/`/`ingestion/`/`categorisation/` changes |
 | Review | `/code-review` on the resulting diff |
 | Test | `pytest`, plus the `run` skill for anything UI- or endpoint-visible |
-| Deploy | Out of scope for MVP (local-only, NFR-1); Phase 2 concern |
+| Deploy | ~~Out of scope for MVP (local-only, NFR-1); Phase 2 concern~~ — **Updated** 2026-08-23: CI (`.github/workflows/ci.yml`) runs `pytest` on every push/PR to `main`. CD (`.github/workflows/cd.yml`) restarts the two local servers on a successful `main` build, via a self-hosted runner (not a cloud one — NFR-1 still holds, this isn't the Phase 2 cloud deploy) once one is registered; `scripts/deploy_local.ps1` does the actual restart. |
 
 The `/feature <description>` command (`.claude/commands/feature.md`) stitches all seven stages into
 one entry point specific to this project, so you don't have to remember the sequence — it's a

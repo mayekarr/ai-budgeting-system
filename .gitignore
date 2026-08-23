@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 finance.db
 .pytest_cache/
+logs/
 
 # Real personal bank statement / categorisation data — never commit, local-only.
 transaction-files/*.xlsx

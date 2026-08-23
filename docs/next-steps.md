@@ -238,6 +238,38 @@ Requirements gathering is well underway. Decided so far (all detailed in
 
    Forecasting and cloud deployment are Phase 2.
 
+## CI/CD (added 2026-08-23, off `main` — not part of a numbered journey)
+
+- **CI** — `.github/workflows/ci.yml`: runs `pytest` on every push/PR to `main`, GitHub-hosted
+  runner. No secrets needed — the Claude API client is always mocked in tests.
+- **CD** — `.github/workflows/cd.yml` + `scripts/deploy_local.ps1`: "deploy" means restart the two
+  local servers with the latest code (NFR-1 — this project is local-only for the MVP, so there's no
+  cloud target to push to yet). Triggers only after CI succeeds on `main`, and requires a
+  **self-hosted runner registered against this repo — not yet done.** To set one up: repo Settings →
+  Actions → Runners → New self-hosted runner on GitHub.com, follow the generated PowerShell
+  commands, and install it as a Windows service (`./svc install` / `./svc start`) so it survives
+  reboots/logouts rather than only running while a terminal is open.
+- **Known risk, not yet solved**: GitHub Actions' self-hosted runner has a built-in post-job process
+  cleanup that kills child processes still running when a job finishes — this would very likely kill
+  the servers `deploy_local.ps1` starts the moment the CD job completes, silently defeating the
+  point. Verified the script itself works standalone (`Start-Process` detachment survives the
+  invoking shell exiting), but couldn't verify against an actual runner job since none is registered
+  yet. The documented fix, deferred until a runner exists to test against rather than solved
+  speculatively: have Windows Task Scheduler own the two server processes (independent of the
+  runner's job tree) and have the CD script just stop/restart those scheduled tasks instead of
+  spawning raw background processes itself.
+- **Automated code review in CI — considered 2026-08-23, deferred.** Rohan asked for `/code-review`
+  to gate every merge, failing CI if issues are found. Researched `anthropics/claude-code-action`
+  (the official GitHub Action): it requires its own pay-as-you-go Anthropic API key (a GitHub secret
+  — GitHub Actions can't use a Claude subscription, only console.anthropic.com API billing), costing
+  roughly $0.20–$2 per PR reviewed. **Decided: not now** — keep `/code-review` as the manual,
+  pre-merge step per `CLAUDE.md`'s existing convention, no new cost or account setup. If revisited,
+  the blocking mechanism should be a required PR review (Claude submits `gh pr review
+  --request-changes`/`--approve`, `main`'s branch protection requires it to pass) rather than
+  parsing the action's free-text output or exit code — the latter has multiple open upstream bugs
+  (spurious non-zero exits after a successful review, silent hangs), so it isn't a reliable signal
+  to gate a merge on.
+
 ## Open questions still tracked
 
 See `docs/product-requirements.md` §7 (Open Questions Log) for the full list with numbering —
