@@ -16,7 +16,14 @@ jobs:
     runs-on: [self-hosted]
 
     steps:
+      # workflow_run doesn't check out the commit that triggered it by default — actions/checkout
+      # would grab main's current HEAD, which can have moved past the CI-validated commit if a
+      # later push landed while this job was queuing. Pin explicitly to the commit CI actually
+      # tested (falls back to github.sha for the workflow_dispatch manual-trigger path, where
+      # workflow_run isn't set).
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Deploy locally
         shell: pwsh
