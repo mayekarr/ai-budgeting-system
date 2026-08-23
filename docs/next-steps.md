@@ -212,6 +212,17 @@ Requirements gathering is well underway. Decided so far (all detailed in
   speculatively: have Windows Task Scheduler own the two server processes (independent of the
   runner's job tree) and have the CD script just stop/restart those scheduled tasks instead of
   spawning raw background processes itself.
+- **Automated code review in CI — considered 2026-08-23, deferred.** Rohan asked for `/code-review`
+  to gate every merge, failing CI if issues are found. Researched `anthropics/claude-code-action`
+  (the official GitHub Action): it requires its own pay-as-you-go Anthropic API key (a GitHub secret
+  — GitHub Actions can't use a Claude subscription, only console.anthropic.com API billing), costing
+  roughly $0.20–$2 per PR reviewed. **Decided: not now** — keep `/code-review` as the manual,
+  pre-merge step per `CLAUDE.md`'s existing convention, no new cost or account setup. If revisited,
+  the blocking mechanism should be a required PR review (Claude submits `gh pr review
+  --request-changes`/`--approve`, `main`'s branch protection requires it to pass) rather than
+  parsing the action's free-text output or exit code — the latter has multiple open upstream bugs
+  (spurious non-zero exits after a successful review, silent hangs), so it isn't a reliable signal
+  to gate a merge on.
 
 ## Open questions still tracked
 
