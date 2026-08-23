@@ -13,13 +13,24 @@ date_from = st.session_state.get("drill_in_date_from")
 date_to = st.session_state.get("drill_in_date_to")
 
 try:
-    # Fetched once, unfiltered — the category dropdown's own options and any selected-category
-    # filtering are both derived from this single result set (Income included, unlike Overview's
-    # spend-only chart), rather than a second server round trip per selection.
-    all_transactions = get_transactions(category=None, date_from=date_from, date_to=date_to)
+    # Fetched once, unfiltered by category — the category dropdown's own options and any
+    # selected-category filtering are both derived from this single result set (Income included,
+    # unlike Overview's spend-only chart), rather than a second server round trip per selection.
+    fetched = get_transactions(category=None, date_from=date_from, date_to=date_to)
 except Exception as exc:  # pylint: disable=broad-except
     st.error(f"Could not load transactions: {exc}")
     st.stop()
+
+# FR-9c/FR-13: Transfer rows are structurally excluded from category breakdowns, and FR-14's
+# drill-in shows that same breakdown's underlying transactions — GET /transactions itself doesn't
+# filter this (unlike GET /summary), and transfer detection never clears a transfer's pre-transfer
+# category, so without this filter a transfer could appear under an ordinary spend category here
+# even though it was never counted in that category's Overview total. superseded_by_id mirrors
+# GET /summary's own exclusion: a settled row's now-resolved pending counterpart would otherwise
+# show as a second, duplicate-looking transaction for the same real-world charge.
+all_transactions = [
+    t for t in fetched if t.get("type") != "Transfer" and t.get("superseded_by_id") is None
+]
 
 options = category_options(present_categories(all_transactions))
 incoming_category = st.session_state.get("drill_in_category", ALL_CATEGORIES)
@@ -46,12 +57,9 @@ else:
     df = pd.DataFrame(transactions)
 
     def _flags(row: pd.Series) -> str:
-        badges = []
-        if row.get("is_refund"):
-            badges.append("↩ refund")
-        if row.get("transfer_group_id") is not None:
-            badges.append("⇄ transfer")
-        return " ".join(badges)
+        # No transfer badge: Transfer-typed rows are filtered out above, so transfer_group_id is
+        # always None here — nothing left for it to flag.
+        return "↩ refund" if row.get("is_refund") else ""
 
     df["flags"] = df.apply(_flags, axis=1)
     st.dataframe(

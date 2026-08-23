@@ -224,8 +224,13 @@ alone extend.
 **Category Drill-in (serves J3, plus J4's UI extension)**
 - Transaction list for the clicked category + active date range, sourced from `GET /transactions`
   filtered by `category`/`date_from`/`date_to`.
-- Inline badges on refund/transfer rows (e.g. "↩ refund", "⇄ transfer ↔ {other account}") so a
-  linked transaction is identifiable without a separate lookup.
+- ~~Inline badges on refund/transfer rows (e.g. "↩ refund", "⇄ transfer ↔ {other account}") so a
+  linked transaction is identifiable without a separate lookup.~~ — **Corrected** 2026-08-23, during
+  a `/code-review` pass on the build: this conflicts with FR-9c/FR-13 (`docs/product-requirements.md`),
+  which structurally exclude `Transfer` rows from category breakdowns — and FR-14 defines drill-in
+  as showing that same breakdown's transactions. Transfer rows are excluded from Drill-in entirely
+  (matching `GET /summary`), not shown with a badge. Only the "↩ refund" badge stands: a refund
+  keeps its category and nets within it (§1 above), so it legitimately belongs in the drill-in list.
 - Inline category-correction control per row, calling `docs/design-data-model-api.md`'s
   `PATCH /transactions/{id}`. J4 wasn't given explicit UX ownership in `docs/design-journeys.md`'s
   split (the rule-learning mechanism lives in `docs/design-data-model-api.md`), but a correction has

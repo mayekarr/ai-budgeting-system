@@ -200,6 +200,31 @@ Requirements gathering is well underway. Decided so far (all detailed in
       19 new tests (97 total): `GET /summary` netting/filtering/sort order, pure date-range-preset
       logic, and dashboard interaction logic via Streamlit `AppTest` (category selection →
       session_state handoff, client-side filtering, empty-state handling).
+      **Two `/code-review` passes, same day, against the pushed branch — 3 more findings, fixed:**
+      a stale-selection bug (Streamlit persists a widget's `session_state` entry by `key=` across
+      reruns and ignores `index=` once that entry exists, so a second Overview→Drill-in handoff
+      with a different category left the first visit's selection stuck — fixed by syncing the
+      widget's key directly whenever the incoming category changes); an AppTest false-positive
+      (`AppTest.from_file()` on a subpage in isolation has no page registry, so `st.page_link`
+      threw `KeyError('url_pathname')` even though the real app — loaded via its actual entrypoint
+      — never hits this; no test asserted `at.exception`, so it was silently swallowed rather than
+      failing loudly — both frontend test files now load via `dashboard.py` + `switch_page()`,
+      matching real usage, with `at.exception` asserted throughout); and a real data-consistency
+      gap — `GET /transactions` (used by Drill-in) didn't exclude `Transfer`-typed or superseded
+      rows the way `GET /summary` does, so clicking a category from Overview's Transfer-excluded
+      total could show a transaction that was never counted in it, or a duplicate-looking
+      pending+settled pair. **Design correction, not just a bug fix**: `docs/design-logic-and-ux.md`
+      §3.2 originally called for an inline "⇄ transfer" badge on Drill-in rows, but FR-9c/FR-13
+      (`docs/product-requirements.md`) are explicit that Transfer rows are structurally excluded
+      from category breakdowns, and FR-14 defines drill-in as showing that same breakdown's
+      transactions — so Transfer rows are now excluded from Drill-in entirely (matching
+      `GET /summary`) rather than shown-with-badge; the badge branch was dead code once transfers
+      can't reach the page, so it was removed rather than defensively patched. A pandas gotcha
+      surfaced in the process and is now moot rather than fixed-in-place: mixing `None` and a real
+      int in one DataFrame column upcasts the whole column to float64 (`None` → `NaN`), and `NaN is
+      not None` is `True` — the old `row.get("transfer_group_id") is not None` check would have
+      badged every non-transfer row too, reproduced directly before the exclusion fix removed the
+      code path. 100 tests passing.
    3. **J4 — Correct a miscategorisation**. `PATCH /transactions/{id}` + `CategorisationRule`
       write-back, correction control on the drill-in page.
    4. **J5 — Needs-review queue**. Forces Tier-2 heuristic matching + `TransferGroup` to mature

@@ -129,6 +129,60 @@ def test_returning_from_overview_with_a_new_category_overrides_the_stale_selecti
     assert shown.iloc[0]["raw_description"] == "MYKI PAYMENTS"
 
 
+def test_drill_in_excludes_transfer_typed_rows():
+    # FR-9c/FR-13: Transfer rows are structurally excluded from category breakdowns, and FR-14's
+    # drill-in is meant to show that same breakdown's underlying transactions — so a Transfer-typed
+    # row must not appear here even though transfer detection never clears its pre-transfer
+    # category (e.g. "Groceries"), and must not count toward that category's option/filter either.
+    def fake_txns(*a, **k):
+        return _fake_all_transactions() + [
+            {
+                "id": 4, "date": "2026-08-07", "raw_description": "CREDIT CARD PAYMENT", "amount": -200.0,
+                "category": "Groceries", "subcategory": None, "type": "Transfer", "is_refund": False,
+                "transfer_group_id": 1, "needs_review": False,
+            },
+        ]
+
+    with patch("frontend.api_client.get_transactions", side_effect=fake_txns):
+        at = _open_drill_in()
+        at.session_state["drill_in_category"] = "Groceries"
+        at.run()
+
+    assert not at.exception
+    shown = at.dataframe[0].value
+    assert len(shown) == 1
+    assert shown.iloc[0]["raw_description"] == "WOOLWORTHS/MAIN ST"
+
+
+def test_drill_in_excludes_superseded_rows():
+    # Matches GET /summary's own exclusion (superseded_by_id IS NOT NULL) — a pending row that's
+    # since been resolved by its settled counterpart must not appear as a second, duplicate-looking
+    # transaction in the list.
+    def fake_txns(*a, **k):
+        return [
+            {
+                "id": 1, "date": "2026-08-05", "raw_description": "PURCHASE AUTHORISATION", "amount": -40.0,
+                "category": "Groceries", "subcategory": None, "type": "Expense", "is_refund": False,
+                "transfer_group_id": None, "needs_review": False, "superseded_by_id": 2,
+            },
+            {
+                "id": 2, "date": "2026-08-06", "raw_description": "WOOLWORTHS/MAIN ST", "amount": -40.0,
+                "category": "Groceries", "subcategory": None, "type": "Expense", "is_refund": False,
+                "transfer_group_id": None, "needs_review": False, "superseded_by_id": None,
+            },
+        ]
+
+    with patch("frontend.api_client.get_transactions", side_effect=fake_txns):
+        at = _open_drill_in()
+        at.session_state["drill_in_category"] = "Groceries"
+        at.run()
+
+    assert not at.exception
+    shown = at.dataframe[0].value
+    assert len(shown) == 1
+    assert shown.iloc[0]["raw_description"] == "WOOLWORTHS/MAIN ST"
+
+
 def test_drill_in_shows_info_when_no_transactions_in_range():
     with patch("frontend.api_client.get_transactions", side_effect=lambda *a, **k: []):
         at = _open_drill_in()
