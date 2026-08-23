@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from frontend.api_client import get_summary
-from frontend.categories import ALL_CATEGORIES, category_options
+from frontend.categories import category_options
 from frontend.date_ranges import PRESETS, resolve_date_range
 
 st.set_page_config(page_title="Overview", layout="wide")

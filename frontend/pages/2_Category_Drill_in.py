@@ -22,11 +22,17 @@ except Exception as exc:  # pylint: disable=broad-except
     st.stop()
 
 options = category_options(present_categories(all_transactions))
-default_category = st.session_state.get("drill_in_category", ALL_CATEGORIES)
-default_index = options.index(default_category) if default_category in options else 0
-selected_category = st.selectbox(
-    "Category", options, index=default_index, key="drill_in_category_select"
-)
+incoming_category = st.session_state.get("drill_in_category", ALL_CATEGORIES)
+
+# Streamlit persists a widget's own session_state entry (by `key=`) across reruns and ignores
+# `index=` once that entry exists — so a fresh handoff from Overview must be applied by writing
+# directly into the widget's key, not just passed as `index`, or a prior selection on this page
+# (from either an earlier Overview visit or the user's own dropdown change) would stick instead.
+if st.session_state.get("_drill_in_last_seen_handoff") != incoming_category:
+    st.session_state["drill_in_category_select"] = incoming_category if incoming_category in options else options[0]
+    st.session_state["_drill_in_last_seen_handoff"] = incoming_category
+
+selected_category = st.selectbox("Category", options, key="drill_in_category_select")
 
 if selected_category == ALL_CATEGORIES:
     transactions = all_transactions

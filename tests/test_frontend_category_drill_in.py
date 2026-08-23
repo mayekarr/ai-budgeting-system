@@ -27,13 +27,24 @@ def _fake_all_transactions(*args, **kwargs):
     ]
 
 
+def _open_drill_in() -> AppTest:
+    # Loaded through the real multipage entrypoint (dashboard.py) + switch_page, matching how a
+    # user actually reaches this page (and how tests/test_frontend_overview.py now loads Overview),
+    # rather than AppTest.from_file("frontend/pages/2_Category_Drill_in.py") in isolation.
+    at = AppTest.from_file("frontend/dashboard.py", default_timeout=15)
+    at.run()
+    at.switch_page("pages/2_Category_Drill_in.py")
+    return at
+
+
 def test_drill_in_fetches_the_date_range_unfiltered_by_category():
     # Fetched once, unfiltered — the category dropdown's own options (and any client-side
     # filtering) are derived from this single result set, not a second server round trip.
     with patch("frontend.api_client.get_transactions", side_effect=_fake_all_transactions) as mock_get:
-        at = AppTest.from_file("frontend/pages/2_Category_Drill_in.py", default_timeout=15)
+        at = _open_drill_in()
         at.run()
 
+    assert not at.exception
     _, kwargs = mock_get.call_args
     assert kwargs["category"] is None
     assert mock_get.call_count == 1
@@ -44,28 +55,31 @@ def test_drill_in_category_options_include_income():
     # inherit that exclusion, since browsing Income transactions is still a legitimate use of this
     # page even though Overview's spend chart doesn't surface it.
     with patch("frontend.api_client.get_transactions", side_effect=_fake_all_transactions):
-        at = AppTest.from_file("frontend/pages/2_Category_Drill_in.py", default_timeout=15)
+        at = _open_drill_in()
         at.run()
 
+    assert not at.exception
     options = at.selectbox(key="drill_in_category_select").options
     assert options == [ALL_CATEGORIES, "Groceries", "Income", "Transport"]
 
 
 def test_drill_in_defaults_to_all_categories_when_arriving_directly():
     with patch("frontend.api_client.get_transactions", side_effect=_fake_all_transactions):
-        at = AppTest.from_file("frontend/pages/2_Category_Drill_in.py", default_timeout=15)
+        at = _open_drill_in()
         at.run()
 
+    assert not at.exception
     assert at.selectbox(key="drill_in_category_select").value == ALL_CATEGORIES
     assert len(at.dataframe[0].value) == 3
 
 
 def test_drill_in_defaults_to_category_from_session_state():
     with patch("frontend.api_client.get_transactions", side_effect=_fake_all_transactions):
-        at = AppTest.from_file("frontend/pages/2_Category_Drill_in.py", default_timeout=15)
+        at = _open_drill_in()
         at.session_state["drill_in_category"] = "Groceries"
         at.run()
 
+    assert not at.exception
     assert at.selectbox(key="drill_in_category_select").value == "Groceries"
     shown = at.dataframe[0].value
     assert len(shown) == 1
@@ -74,10 +88,11 @@ def test_drill_in_defaults_to_category_from_session_state():
 
 def test_selecting_a_category_filters_the_table_client_side():
     with patch("frontend.api_client.get_transactions", side_effect=_fake_all_transactions):
-        at = AppTest.from_file("frontend/pages/2_Category_Drill_in.py", default_timeout=15)
+        at = _open_drill_in()
         at.run()
         at.selectbox(key="drill_in_category_select").select("Transport").run()
 
+    assert not at.exception
     shown = at.dataframe[0].value
     assert len(shown) == 1
     assert shown.iloc[0]["raw_description"] == "MYKI PAYMENTS"
@@ -85,17 +100,38 @@ def test_selecting_a_category_filters_the_table_client_side():
 
 def test_selecting_all_categories_shows_everything():
     with patch("frontend.api_client.get_transactions", side_effect=_fake_all_transactions):
-        at = AppTest.from_file("frontend/pages/2_Category_Drill_in.py", default_timeout=15)
+        at = _open_drill_in()
         at.session_state["drill_in_category"] = "Groceries"
         at.run()
         at.selectbox(key="drill_in_category_select").select(ALL_CATEGORIES).run()
 
+    assert not at.exception
     assert len(at.dataframe[0].value) == 3
+
+
+def test_returning_from_overview_with_a_new_category_overrides_the_stale_selection():
+    # Streamlit persists a widget's own session_state entry (keyed by `key=`) across reruns and
+    # ignores `index=` once that entry exists — so a second Overview -> Drill-in handoff with a
+    # different category must not leave the first visit's selection stuck.
+    with patch("frontend.api_client.get_transactions", side_effect=_fake_all_transactions):
+        at = _open_drill_in()
+        at.session_state["drill_in_category"] = "Groceries"
+        at.run()
+        assert at.selectbox(key="drill_in_category_select").value == "Groceries"
+
+        at.session_state["drill_in_category"] = "Transport"
+        at.run()
+
+    assert not at.exception
+    assert at.selectbox(key="drill_in_category_select").value == "Transport"
+    shown = at.dataframe[0].value
+    assert len(shown) == 1
+    assert shown.iloc[0]["raw_description"] == "MYKI PAYMENTS"
 
 
 def test_drill_in_shows_info_when_no_transactions_in_range():
     with patch("frontend.api_client.get_transactions", side_effect=lambda *a, **k: []):
-        at = AppTest.from_file("frontend/pages/2_Category_Drill_in.py", default_timeout=15)
+        at = _open_drill_in()
         at.run()
 
     assert not at.exception
