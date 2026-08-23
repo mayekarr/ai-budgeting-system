@@ -72,6 +72,20 @@ class UploadResult(BaseModel):
     needs_review_count: int
 
 
+class CategorySummary(BaseModel):
+    category: str
+    amount: float
+
+
+class SummaryOut(BaseModel):
+    date_from: date_type | None
+    date_to: date_type | None
+    total_income: float
+    total_expense: float
+    net: float
+    by_category: List[CategorySummary]
+
+
 def get_session() -> Generator[Session, None, None]:
     """FastAPI dependency; reads SessionLocal from this module so tests can swap it out."""
     db = SessionLocal()
@@ -217,3 +231,59 @@ def list_transactions(
     records = q.order_by(Transaction.date.desc(), Transaction.id.desc()).all()
     logger.info("Fetched %d transactions.", len(records))
     return records
+
+
+@app.get("/summary", response_model=SummaryOut)
+def get_summary(
+    db: Session = Depends(get_session),
+    date_from: Optional[date_type] = Query(default=None),
+    date_to: Optional[date_type] = Query(default=None),
+    account_id: Optional[int] = Query(default=None),
+) -> SummaryOut:
+    """
+    Income vs. expense over a period (J2, plus J7's Tax Refund filter as a category=Income query),
+    excluding Transfer-typed and superseded rows.
+
+    Buckets by `category`, not `type`: every income source (Salary, Interest, Tax Refund, ...) is
+    seeded under the `Income` category (categorisation/taxonomy.py), while a genuine refund keeps
+    the category of the purchase it's refunding — so grouping by category alone correctly nets a
+    refund against its own category rather than counting it as income (FR-9b), even though the
+    upload pipeline's `type` field is assigned from amount sign alone and would otherwise mislabel
+    a refund credit as `Income`.
+    """
+    q = db.query(Transaction).filter(
+        Transaction.type != "Transfer", Transaction.superseded_by_id.is_(None)
+    )
+    if date_from is not None:
+        q = q.filter(Transaction.date >= date_from)
+    if date_to is not None:
+        q = q.filter(Transaction.date <= date_to)
+    if account_id is not None:
+        q = q.filter(Transaction.account_id == account_id)
+
+    total_income = 0.0
+    category_raw_totals: dict[str, float] = {}
+    for tx in q.all():
+        if tx.category == "Income":
+            total_income += tx.amount
+            continue
+        label = tx.category or "Uncategorized"
+        category_raw_totals[label] = category_raw_totals.get(label, 0.0) + tx.amount
+
+    # Stored amounts are negative for spend, positive for a refund credit — negate so a category's
+    # `amount` reads as "net spend" (positive), matching what a spend breakdown chart expects.
+    by_category = sorted(
+        (CategorySummary(category=c, amount=-raw) for c, raw in category_raw_totals.items()),
+        key=lambda c: c.amount,
+        reverse=True,
+    )
+    total_expense = sum(c.amount for c in by_category)
+
+    return SummaryOut(
+        date_from=date_from,
+        date_to=date_to,
+        total_income=total_income,
+        total_expense=total_expense,
+        net=total_income - total_expense,
+        by_category=by_category,
+    )
