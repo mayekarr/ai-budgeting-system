@@ -1,7 +1,7 @@
 # Next Steps
 
 Status: Active
-Last updated: 2026-08-19
+Last updated: 2026-08-23
 Companion to: `docs/product-requirements.md` (Draft v9) — read that first for full requirements
 detail; this doc is a resumable to-do list, not a requirements source of truth.
 
@@ -177,8 +177,29 @@ Requirements gathering is well underway. Decided so far (all detailed in
       transfer-detection pass could overwrite a deliberately-classified ATO tax refund into a
       `Transfer` if a coincidental amount/date match existed on another account — now explicitly
       excluded. 66 tests passing.
-   2. **J2 + J3 — View & drill into spending**. `GET /summary`, `GET /transactions?category=`,
-      Overview + Category Drill-in pages. First genuinely usable increment.
+   2. ~~**J2 + J3 — View & drill into spending**~~ — **Done** 2026-08-23. `GET /summary`
+      (`backend/api.py`) buckets by `category`, not `type`: every income source is seeded under the
+      `Income` category, so grouping by category alone correctly nets a genuine refund credit
+      against the category it's refunding (FR-9b) rather than counting it as income — without
+      touching the upload pipeline's amount-sign-based `type` assignment. `GET /transactions`
+      already supported `category`/`date_from`/`date_to` filtering from J1, so J3's drill-in needed
+      no new endpoint, just test coverage confirming the combination works.
+      Dashboard rebuilt as a Streamlit multi-page app (`frontend/pages/`), since `frontend/
+      dashboard.py` was unrunnable against the new schema as planned: **Overview**
+      (KPI row + category spend breakdown chart from `GET /summary`, date-range presets) and
+      **Category Drill-in** (transaction list + refund/transfer badges from `GET /transactions`).
+      Both pages' category selectors are scoped to categories actually present in the selected date
+      range (not the static 16-category taxonomy) plus an "All Categories" option — added after
+      Rohan flagged there was no way to see everything unfiltered. Overview's list stays spend-only
+      (mirrors `GET /summary`'s `by_category`, which excludes `Income`); Drill-in derives its own
+      option list from the raw transaction set instead, so `Income` transactions (salary, etc.)
+      remain browsable there even though Overview's spend chart doesn't surface them.
+      `frontend/api_client.py` (new): the dashboard now calls the FastAPI backend over HTTP
+      (`httpx`) instead of reading SQLite directly, closing a gap the design docs specified
+      (`docs/design-logic-and-ux.md` §3.1) that the original `dashboard.py` never actually followed.
+      19 new tests (97 total): `GET /summary` netting/filtering/sort order, pure date-range-preset
+      logic, and dashboard interaction logic via Streamlit `AppTest` (category selection →
+      session_state handoff, client-side filtering, empty-state handling).
    3. **J4 — Correct a miscategorisation**. `PATCH /transactions/{id}` + `CategorisationRule`
       write-back, correction control on the drill-in page.
    4. **J5 — Needs-review queue**. Forces Tier-2 heuristic matching + `TransferGroup` to mature
