@@ -1,0 +1,23 @@
+name: CD (local deploy)
+
+# Runs only after the CI workflow finishes successfully on main — never on a PR, and never if
+# tests failed. Requires a self-hosted runner registered against this repo (see
+# docs/next-steps.md for setup); there is no cloud deploy target yet (NFR-1/NFR-2 — Phase 2).
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    runs-on: [self-hosted]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy locally
+        shell: pwsh
+        run: ./scripts/deploy_local.ps1
