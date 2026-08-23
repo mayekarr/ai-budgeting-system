@@ -240,8 +240,27 @@ Requirements gathering is well underway. Decided so far (all detailed in
 
 ## CI/CD (added 2026-08-23, off `main` — not part of a numbered journey)
 
+- **TODO, no deadline: register a self-hosted runner and confirm CD actually works.** CI is live and
+  green on `main` (fixed 2026-08-23 — see below). CD is built but inert: its first-ever trigger
+  (commit `c1d730d`) sat `queued` with no eligible runner and was cancelled by Rohan the same day,
+  which is the correct call — nothing is lost by leaving this queued rather than configuring a
+  runner under time pressure. Whenever picked back up: follow the runner setup steps below, then
+  actually watch one CD run complete (not just queue) to verify or refute the process-cleanup risk
+  flagged further down, before trusting it unattended.
 - **CI** — `.github/workflows/ci.yml`: runs `pytest` on every push/PR to `main`, GitHub-hosted
   runner. No secrets needed — the Claude API client is always mocked in tests.
+  **Broke on its first-ever real run, fixed same day (2026-08-23) — two root causes, both
+  invisible locally the whole time:** (1) bare `pytest` (the command `CLAUDE.md` documents) doesn't
+  add the repo root to `sys.path` the way `python -m pytest` does — every local run this project's
+  been developed against used the `-m` form, so `ModuleNotFoundError` on `backend`/`frontend`/etc.
+  never surfaced until CI's fresh checkout hit it. Fixed at the root with `pyproject.toml`'s
+  `pythonpath = ["."]`, not by changing CI's invocation, so bare `pytest` now genuinely works
+  everywhere as documented. (2) Streamlit's `AppTest.from_file`'s relative-path resolution differs
+  across versions — `requirements.txt` doesn't pin `streamlit`, so CI installed a version that
+  always resolves relative to the calling test file's directory, unlike the locally-installed one.
+  Fixed by passing absolute paths in the two frontend AppTest test files instead of relying on
+  that ambiguity. Both fixes verified against the real `pytest.exe` console script (true bare
+  `pytest`, matching CI's exact invocation), not just `python -m pytest`.
 - **CD** — `.github/workflows/cd.yml` + `scripts/deploy_local.ps1`: "deploy" means restart the two
   local servers with the latest code (NFR-1 — this project is local-only for the MVP, so there's no
   cloud target to push to yet). Triggers only after CI succeeds on `main`, and requires a
