@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+# Makes backend/frontend/transfers/ingestion importable as top-level packages regardless of how
+# pytest is invoked. Without this, only `python -m pytest` works (the `-m` flag adds cwd to
+# sys.path itself) — bare `pytest`, which is what CLAUDE.md documents as the test command, fails
+# with ModuleNotFoundError on a fresh checkout with no residual sys.path state, exactly as it did
+# in CI (.github/workflows/ci.yml) the first time that workflow actually ran.
+pythonpath = ["."]
