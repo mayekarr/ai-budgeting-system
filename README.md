@@ -1,18 +1,28 @@
 ## AI Personal Budgeting and Expense Categorisation System
 
-A minimal but production-quality MVP for importing bank transactions from CSV, automatically categorising expenses, and visualising spending in a simple dashboard.
+A personal tool that ingests real bank statements, categorises transactions using rule-based
+matching with a Claude API fallback, detects inter-account transfers and refunds, and (once later
+build increments land) presents everything in a dashboard.
 
-### Features
+Full requirements/design live in `docs/` — see `CLAUDE.md` for where to start. This README covers
+setup and what's runnable today.
 
-- **CSV Import**: Upload bank transactions as CSV via FastAPI.
-- **Database Storage**: Transactions are stored in a local SQLite database using SQLAlchemy ORM.
-- **Automatic Categorisation**:
-  - Extracts merchant names from transaction descriptions.
-  - Applies rule-based mapping to categories (e.g. Uber → Transport).
-- **Dashboard** (Streamlit):
-  - Total spending and income metrics.
-  - Spending by category (bar chart).
-  - Filterable transaction table.
+### Features (build increment 1 — J1, "upload a statement")
+
+- **Statement import**: upload a NAB-style bank statement CSV/xlsx via FastAPI (Macquarie-style and
+  headerless-CommBank-style formats are a fast-follow, not yet supported).
+- **Account resolution**: maps a statement's raw account identifier to one of the user's `Account`
+  records via `AccountAlias`, auto-creating and flagging unrecognised ones.
+- **Categorisation**: rule-based matching (seeded from real historical data) first, falling back to
+  Claude API (Haiku 4.5) for anything unmatched — low-confidence results are flagged for review, not
+  silently guessed.
+- **Transfer/refund detection**: Tier-1 signal-based matching links inter-account transfers into a
+  `TransferGroup`; refunds are tagged, with a scoped exception routing ATO tax refunds to `Income`.
+- **De-duplication**: re-uploading an overlapping statement never creates duplicate rows.
+
+**Not yet built**: the dashboard (`frontend/dashboard.py` predates this schema and won't run against
+it until build increment 2 rebuilds it — see `docs/next-steps.md` step 6), category corrections,
+the needs-review queue UI, the investment/asset view, and historical backfill.
 
 ---
 
@@ -21,8 +31,10 @@ A minimal but production-quality MVP for importing bank transactions from CSV, a
 - **Language**: Python 3.11
 - **Backend**: FastAPI
 - **Database**: SQLite + SQLAlchemy ORM
-- **Frontend**: Streamlit
+- **Categorisation fallback**: Claude API (Anthropic), model `claude-haiku-4-5-20251001`
+- **Frontend** (not yet rebuilt against the current schema): Streamlit
 - **Data Processing**: Pandas
+- **Tests**: pytest, tests-first per the `tdd-workflow` skill
 
 ---
 
@@ -31,18 +43,24 @@ A minimal but production-quality MVP for importing bank transactions from CSV, a
 ```text
 ai-budgeting-system/
   backend/
-    models.py
-    database.py
-    api.py
+    models.py          # Account, AccountAlias, Transaction, TransferGroup, CategorisationRule
+    database.py         # session management, de-duped persistence
+    api.py               # FastAPI app: /transactions/upload, /transactions
   ingestion/
-    csv_importer.py
+    nab_format.py        # NAB-style statement parser
+    account_resolution.py
   categorisation/
-    merchant_parser.py
-    categoriser.py
+    taxonomy.py           # the 16-category merged taxonomy
+    rules.py               # rule matching
+    claude_fallback.py      # Claude API fallback for unmatched merchants
+    seed_rules.py             # starter rules from real historical data
+  transfers/
+    detection.py             # Tier-1 transfer signal matching + TransferGroup linking
+    refunds.py                # is_refund detection, incl. the ATO tax-refund exception
   frontend/
-    dashboard.py
+    dashboard.py               # predates the current schema — not runnable yet
   tests/
-    test_importer.py
+  docs/                          # requirements, design docs, diagrams
   requirements.txt
   README.md
 ```
@@ -67,17 +85,24 @@ ai-budgeting-system/
    .venv\Scripts\activate.bat
    ```
 
-3. **Install dependencies**
+3. **Install dependencies** (includes `pytest`/`httpx`/`openpyxl`/`anthropic` — all required to run
+   the app and its test suite, not optional extras)
 
    ```bash
    pip install --upgrade pip
    pip install -r requirements.txt
    ```
 
-4. (Optional) **Run tests**
+4. **Set your Claude API key** (only needed for the real fallback path — the test suite mocks it)
 
    ```bash
-   pip install pytest
+   setx ANTHROPIC_API_KEY "sk-ant-..."   # Windows
+   # or: export ANTHROPIC_API_KEY="sk-ant-..."
+   ```
+
+5. **Run tests**
+
+   ```bash
    pytest
    ```
 
@@ -85,113 +110,41 @@ ai-budgeting-system/
 
 ### Running the Backend (FastAPI)
 
-From the project root (`ai-budgeting-system`):
+From the project root:
 
 ```bash
 uvicorn backend.api:app --reload
 ```
 
-The API will be available at:
-
-- `http://127.0.0.1:8000`
+- API: `http://127.0.0.1:8000`
 - Interactive docs: `http://127.0.0.1:8000/docs`
+
+The backend creates `finance.db` (SQLite) and seeds starter categorisation rules on first run.
 
 #### Endpoints
 
-- **POST `/upload-transactions`**
+- **POST `/transactions/upload`**
 
-  - Content-Type: `multipart/form-data`
-  - Field name: `file` (CSV file)
-  - Example CSV format:
+  - Content-Type: `multipart/form-data`, field name: `file` — a NAB-style statement (CSV or xlsx)
+  - Real column layout expected:
 
     ```csv
-    Date,Description,Amount
-    2026-01-05,UBER TRIP,-22.40
-    2026-01-06,WOOLWORTHS,-85.20
-    2026-01-08,NETFLIX,-15.99
+    Date,Amount,Account Number,Transaction Type,Transaction Details,Balance,Category,Merchant Name,Processed On
+    2026-08-08,-38.66,Card ending 2957,PURCHASE AUTHORISATION,HILLS MEATS PTY LTDHILLS Forest Hill 036,-4131.90,Services,Hills Meats,
     ```
+
+    (`Category`/`Merchant Name` are the bank's own values — read as a detection signal only, never
+    trusted as the output category; see `docs/product-requirements.md` §4.1.)
 
 - **GET `/transactions`**
 
-  - Returns all stored transactions.
-
-- **GET `/summary`**
-
-  - Returns spending summarised by category.
-
-The backend automatically creates the `finance.db` SQLite database in the project root on first run.
-
----
-
-### Running the Dashboard (Streamlit)
-
-From the project root (`ai-budgeting-system`):
-
-```bash
-streamlit run frontend/dashboard.py
-```
-
-The dashboard will open in your browser (typically `http://localhost:8501`).
-
-> **Note:** The dashboard reads directly from the `finance.db` SQLite file. Make sure:
-> - You run Streamlit from the project root so the relative DB path matches.
-> - You have imported some CSV transactions via the FastAPI backend first.
-
----
-
-### Usage Flow
-
-1. **Start the backend**
-
-   ```bash
-   uvicorn backend.api:app --reload
-   ```
-
-2. **Import transactions**
-
-   - Open `http://127.0.0.1:8000/docs`.
-   - Use the `/upload-transactions` endpoint.
-   - Upload a CSV file with columns: `Date`, `Description`, `Amount`.
-
-3. **Start the dashboard**
-
-   ```bash
-   streamlit run frontend/dashboard.py
-   ```
-
-4. **Explore spending**
-
-   - View total spending, income, and net cash flow.
-   - See spending by category as a bar chart.
-   - Browse and filter individual transactions.
-
----
-
-### Categorisation Rules
-
-- **Merchant Extraction** (`categorisation/merchant_parser.py`)
-
-  Examples:
-
-  - `"UBER TRIP"` → `Uber`
-  - `"WOOLWORTHS 3345"` → `Woolworths`
-  - `"NETFLIX.COM"` → `Netflix`
-  - Unknown or unrecognised patterns → `Unknown`
-
-- **Expense Categorisation** (`categorisation/categoriser.py`)
-
-  | Merchant    | Category       |
-  | ----------- | -------------- |
-  | Uber        | Transport      |
-  | Woolworths  | Groceries      |
-  | Netflix     | Entertainment  |
-  | Amazon      | Shopping       |
-  | (fallback)  | Other          |
+  - Filters: `date_from`, `date_to`, `account_id`, `category`, `type`, `needs_review`.
 
 ---
 
 ### Notes
 
-- Amounts are stored as floats; negative values represent debits (spending), positive values represent credits.
-- This MVP is intentionally simple but structured for extension.
-
+- Amounts are signed floats; negative = debit/spend, positive = credit.
+- Every design decision behind this build is traceable to `docs/design-journeys.md`,
+  `docs/design-data-model-api.md`, and `docs/design-logic-and-ux.md` — read those before extending
+  this code, not just this README.

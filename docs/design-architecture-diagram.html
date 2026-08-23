@@ -1,0 +1,457 @@
+<title>Statement to Insight</title>
+<style>
+  :root {
+    --bg: #F1F4F2;
+    --surface: #FFFFFF;
+    --surface-2: #F7FAF8;
+    --ink: #16232B;
+    --ink-soft: #4B5D63;
+    --line: #5B6D72;
+    --accent: #2F6F5E;
+    --accent-soft: #DCEDE7;
+    --warn: #A3650F;
+    --warn-soft: #F3E3C8;
+    --rule: #CBD5D2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0E161C;
+      --surface: #16222B;
+      --surface-2: #1B2830;
+      --ink: #E7EEEC;
+      --ink-soft: #9FB2AF;
+      --line: #7E9095;
+      --accent: #59BC9E;
+      --accent-soft: #1D362F;
+      --warn: #E3A959;
+      --warn-soft: #3A2E1B;
+      --rule: #2C3A40;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0E161C;
+    --surface: #16222B;
+    --surface-2: #1B2830;
+    --ink: #E7EEEC;
+    --ink-soft: #9FB2AF;
+    --line: #7E9095;
+    --accent: #59BC9E;
+    --accent-soft: #1D362F;
+    --warn: #E3A959;
+    --warn-soft: #3A2E1B;
+    --rule: #2C3A40;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+    line-height: 1.5;
+  }
+
+  .page {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 56px 32px 80px;
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+  }
+
+  .eyebrow {
+    font: 600 12px/1 'Segoe UI', sans-serif;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  h1 {
+    font-family: 'Iowan Old Style', 'Palatino Linotype', Georgia, 'Times New Roman', serif;
+    font-weight: 600;
+    font-size: clamp(32px, 5vw, 46px);
+    line-height: 1.08;
+    margin: 10px 0 0;
+    text-wrap: balance;
+    color: var(--ink);
+  }
+
+  .dek {
+    max-width: 62ch;
+    margin: 14px 0 0;
+    font-size: 16px;
+    color: var(--ink-soft);
+  }
+
+  .dek code {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: .92em;
+    background: var(--surface-2);
+    border: 1px solid var(--rule);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--ink);
+  }
+
+  figure {
+    margin: 0;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    padding: 28px 24px 22px;
+  }
+
+  .diagram-scroll {
+    overflow-x: auto;
+  }
+
+  svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+
+  figcaption {
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid var(--rule);
+    font-size: 13px;
+    color: var(--ink-soft);
+    max-width: 78ch;
+  }
+
+  /* SVG presentation classes */
+  .box { fill: var(--surface-2); stroke: var(--line); stroke-width: 1.4; }
+  .box-review { fill: var(--warn-soft); stroke: var(--warn); stroke-width: 1.4; }
+  .box-dash { fill: var(--surface-2); stroke: var(--line); stroke-width: 1.4; stroke-dasharray: 5 4; }
+  .box-note { fill: var(--surface); stroke: var(--rule); stroke-width: 1; stroke-dasharray: 3 3; }
+
+  .title-text { font: 600 13px/1 'Segoe UI', sans-serif; fill: var(--ink); }
+  .sub-text { font: 400 11px/1 'Segoe UI', sans-serif; fill: var(--ink-soft); }
+  .mono-text { font: 400 10.5px/1 'SFMono-Regular', Consolas, monospace; fill: var(--ink-soft); }
+  .note-text { font: 400 10.5px/1 'Segoe UI', sans-serif; fill: var(--warn); }
+  .group-label { font: 600 11px/1 'Segoe UI', sans-serif; letter-spacing: .04em; text-transform: uppercase; fill: var(--ink-soft); }
+
+  .flow-line { stroke: var(--line); stroke-width: 1.6; fill: none; }
+  .loop-line { stroke: var(--accent); stroke-width: 1.6; fill: none; }
+  .dash-line { stroke: var(--line); stroke-width: 1.4; fill: none; stroke-dasharray: 5 4; }
+  .loop-text { font: 600 10.5px/1 'Segoe UI', sans-serif; fill: var(--accent); }
+  .dash-text { font: 400 10.5px/1 'Segoe UI', sans-serif; fill: var(--ink-soft); }
+
+  .arrow-head-main { fill: var(--line); }
+  .arrow-head-accent { fill: var(--accent); }
+
+  .jtag {
+    fill: var(--accent-soft);
+    stroke: var(--accent);
+    stroke-width: 1;
+  }
+  .jtag-text {
+    font: 700 10px/1 'SFMono-Regular', Consolas, monospace;
+    fill: var(--accent);
+  }
+
+  /* Legend */
+  .legend {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0,1fr));
+    gap: 8px 32px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    padding: 24px 28px;
+  }
+  @media (max-width: 720px) { .legend { grid-template-columns: 1fr; } }
+
+  .legend h2 {
+    grid-column: 1 / -1;
+    font-family: 'Iowan Old Style', Georgia, serif;
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0 0 6px;
+  }
+
+  .jrow {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 7px 0;
+    border-top: 1px solid var(--rule);
+    font-size: 13.5px;
+  }
+  .jrow:nth-of-type(1), .jrow:nth-of-type(2) { border-top: none; }
+
+  .jrow .jnum {
+    font: 700 11px/1 'SFMono-Regular', Consolas, monospace;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: 1px solid var(--accent);
+    padding: 3px 6px;
+    flex: 0 0 auto;
+  }
+
+  .jrow .jname { color: var(--ink); font-weight: 600; }
+  .jrow .jfr { color: var(--ink-soft); font-size: 12px; }
+
+  .key {
+    margin-top: 24px;
+    padding-top: 18px;
+    border-top: 1px solid var(--rule);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px 28px;
+    font-size: 13px;
+    color: var(--ink-soft);
+  }
+  .key span { display: inline-flex; align-items: center; gap: 8px; }
+  .swatch { width: 22px; height: 2px; display: inline-block; }
+  .swatch.solid { background: var(--line); }
+  .swatch.dash  { background: repeating-linear-gradient(90deg, var(--line) 0 6px, transparent 6px 10px); }
+  .swatch.loop  { background: var(--accent); }
+  .swatch.warn  { width: 14px; height: 14px; border: 1.4px solid var(--warn); background: var(--warn-soft); }
+
+  footer {
+    font-size: 12.5px;
+    color: var(--ink-soft);
+  }
+  footer code {
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    background: var(--surface-2);
+    border: 1px solid var(--rule);
+    padding: 1px 5px;
+  }
+</style>
+
+<div class="page">
+
+  <div>
+    <div class="eyebrow">AI Budgeting System — Design Phase, Step 5</div>
+    <h1>Statement to Insight</h1>
+    <p class="dek">
+      How a raw bank export becomes a categorised, review-ready line in the dashboard — and where
+      each of the ten storyboarded journeys (<code>J1–J10</code>) from
+      <code>docs/design-journeys.md</code> sits on that path.
+    </p>
+  </div>
+
+  <figure>
+    <div class="diagram-scroll">
+      <svg viewBox="0 0 1200 1190" role="img" aria-label="Pipeline diagram: seven bank accounts across three raw formats are ingested and resolved to accounts, categorised by rule match then LLM fallback, checked for transfers and refunds across two detection tiers, stored, and either flagged to a needs-review queue or served through the API to five dashboard views. A separate one-time backfill path feeds historical data into the same store and queue. User corrections in the review queue loop back to create new categorisation rules.">
+        <defs>
+          <marker id="arrowMain" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <polygon class="arrow-head-main" points="0,0 10,5 0,10" />
+          </marker>
+          <marker id="arrowAccent" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <polygon class="arrow-head-accent" points="0,0 10,5 0,10" />
+          </marker>
+        </defs>
+
+        <!-- ROW 1: Sources -->
+        <g>
+          <rect class="box" x="40" y="50" width="356" height="100" />
+          <text class="group-label" x="60" y="76">Sources · NAB-style</text>
+          <text class="title-text" x="60" y="98">Card / plain acct # / masked #</text>
+          <text class="mono-text" x="60" y="118">CC · JC · RC · AC</text>
+          <text class="sub-text" x="60" y="136">signed Amount, Transaction Type</text>
+
+          <rect class="box" x="420" y="50" width="356" height="100" />
+          <text class="group-label" x="440" y="76">Sources · Macquarie-style</text>
+          <text class="title-text" x="440" y="98">Debit / Credit split columns</text>
+          <text class="mono-text" x="440" y="118">MAC · MACACC</text>
+          <text class="sub-text" x="440" y="136">Category / Subcategory provided</text>
+
+          <rect class="box" x="800" y="50" width="360" height="100" />
+          <text class="group-label" x="820" y="76">Sources · headerless</text>
+          <text class="title-text" x="820" y="98">Raw CommBank-style export</text>
+          <text class="mono-text" x="820" y="118">NBA</text>
+          <text class="sub-text" x="820" y="136">no header row at all</text>
+        </g>
+
+        <!-- arrow sources -> ingest -->
+        <line class="flow-line" x1="600" y1="150" x2="600" y2="196" marker-end="url(#arrowMain)" />
+        <rect class="jtag" x="580" y="163" width="40" height="18" />
+        <text class="jtag-text" x="600" y="176" text-anchor="middle">J1</text>
+
+        <!-- ROW 2: Ingest -->
+        <rect class="box" x="300" y="196" width="600" height="70" />
+        <text class="title-text" x="600" y="226" text-anchor="middle">Ingest &amp; Resolve</text>
+        <text class="sub-text" x="600" y="246" text-anchor="middle">detect format · resolve Account via AccountAlias · de-dupe</text>
+
+        <!-- ingest -> categorise split -->
+        <line class="flow-line" x1="600" y1="266" x2="600" y2="288" />
+        <line class="flow-line" x1="600" y1="288" x2="350" y2="312" marker-end="url(#arrowMain)" />
+        <line class="flow-line" x1="600" y1="288" x2="850" y2="312" marker-end="url(#arrowMain)" />
+
+        <!-- ROW 3: Categorise -->
+        <rect class="box" x="140" y="312" width="420" height="100" />
+        <text class="title-text" x="350" y="342" text-anchor="middle">Rule Match</text>
+        <text class="mono-text" x="350" y="364" text-anchor="middle">CategorisationRule</text>
+        <text class="sub-text" x="350" y="384" text-anchor="middle">priority order · confidence 1.0</text>
+
+        <rect class="box" x="640" y="312" width="420" height="100" />
+        <text class="title-text" x="850" y="342" text-anchor="middle">LLM Fallback</text>
+        <text class="sub-text" x="850" y="364" text-anchor="middle">for anything unmatched</text>
+        <text class="sub-text" x="850" y="384" text-anchor="middle">result promoted to a new rule</text>
+
+        <!-- converge to confidence note -->
+        <line class="flow-line" x1="350" y1="412" x2="480" y2="442" marker-end="url(#arrowMain)" />
+        <line class="flow-line" x1="850" y1="412" x2="720" y2="442" marker-end="url(#arrowMain)" />
+
+        <rect class="box-note" x="350" y="442" width="500" height="50" />
+        <text class="note-text" x="600" y="463" text-anchor="middle">confidence &lt; 0.7 → needs_review = true</text>
+        <text class="sub-text" x="600" y="480" text-anchor="middle">FR-10 — never silently guessed</text>
+
+        <!-- to row4 split -->
+        <line class="flow-line" x1="600" y1="492" x2="600" y2="514" />
+        <line class="flow-line" x1="600" y1="514" x2="350" y2="538" marker-end="url(#arrowMain)" />
+        <line class="flow-line" x1="600" y1="514" x2="850" y2="538" marker-end="url(#arrowMain)" />
+
+        <!-- ROW 4: Transfer / Refund detection -->
+        <rect class="box" x="140" y="538" width="420" height="100" />
+        <text class="title-text" x="350" y="568" text-anchor="middle">Tier 1 — Signal Match</text>
+        <text class="sub-text" x="350" y="590" text-anchor="middle">type/description already IDs a</text>
+        <text class="sub-text" x="350" y="606" text-anchor="middle">self-payment → instant Transfer</text>
+
+        <rect class="box" x="640" y="538" width="420" height="100" />
+        <rect class="jtag" x="1000" y="546" width="40" height="18" />
+        <text class="jtag-text" x="1020" y="559" text-anchor="middle">J9</text>
+        <text class="title-text" x="850" y="568" text-anchor="middle">Tier 2 — Heuristic Pairing</text>
+        <text class="sub-text" x="850" y="590" text-anchor="middle">date/amount match across accounts</text>
+        <text class="sub-text" x="850" y="606" text-anchor="middle">links pairs — and chains of 3+</text>
+
+        <!-- annotation pills -->
+        <rect class="box-note" x="140" y="648" width="420" height="34" />
+        <rect class="jtag" x="150" y="654" width="40" height="18" />
+        <text class="jtag-text" x="170" y="667" text-anchor="middle">J10</text>
+        <text class="note-text" x="360" y="669" text-anchor="middle">external party (e.g. a dependent) ⇒ stays Expense</text>
+
+        <rect class="box-note" x="640" y="648" width="420" height="34" />
+        <rect class="jtag" x="650" y="654" width="40" height="18" />
+        <text class="jtag-text" x="670" y="667" text-anchor="middle">J7</text>
+        <text class="note-text" x="870" y="669" text-anchor="middle">ATO tax refund ⇒ Income, not netted</text>
+
+        <!-- to storage -->
+        <line class="flow-line" x1="600" y1="682" x2="600" y2="714" marker-end="url(#arrowMain)" />
+
+        <!-- ROW 5: Storage + Backfill -->
+        <rect class="box-dash" x="40" y="714" width="260" height="70" />
+        <rect class="jtag" x="50" y="720" width="40" height="18" />
+        <text class="jtag-text" x="70" y="733" text-anchor="middle">J8</text>
+        <text class="title-text" x="170" y="750" text-anchor="middle">One-Time Backfill</text>
+        <text class="sub-text" x="170" y="768" text-anchor="middle">13-yr Expense Log → §4.2.1 remap</text>
+
+        <line class="dash-line" x1="300" y1="749" x2="338" y2="749" marker-end="url(#arrowMain)" />
+
+        <rect class="box" x="340" y="714" width="560" height="70" />
+        <text class="title-text" x="620" y="742" text-anchor="middle">Transaction Store</text>
+        <text class="mono-text" x="620" y="762" text-anchor="middle">Account · Transaction · Asset · CategorisationRule</text>
+
+        <!-- storage -> review -->
+        <line class="flow-line" x1="600" y1="784" x2="600" y2="822" marker-end="url(#arrowMain)" />
+
+        <!-- backfill flagged items -> review queue -->
+        <line class="dash-line" x1="170" y1="784" x2="170" y2="912" />
+        <line class="dash-line" x1="170" y1="912" x2="470" y2="912" />
+        <line class="dash-line" x1="470" y1="912" x2="470" y2="894" marker-end="url(#arrowMain)" />
+        <text class="dash-text" x="175" y="905">4 flagged items (§4.2.1)</text>
+
+        <!-- ROW 6: Review queue -->
+        <rect class="box-review" x="380" y="822" width="440" height="72" />
+        <rect class="jtag" x="392" y="830" width="40" height="18" />
+        <text class="jtag-text" x="412" y="843" text-anchor="middle">J5</text>
+        <text class="title-text" x="620" y="850" text-anchor="middle">Needs-Review Queue</text>
+        <text class="sub-text" x="620" y="870" text-anchor="middle">low-confidence category, or low-confidence match</text>
+        <text class="sub-text" x="620" y="886" text-anchor="middle">(FR-10, FR-9e tier 2)</text>
+
+        <!-- feedback loop 1: review -> rule match (learning loop) -->
+        <polyline class="loop-line" points="380,858 90,858 90,362 138,362" marker-end="url(#arrowAccent)" />
+        <text class="loop-text" x="95" y="600" transform="rotate(-90 95,600)" text-anchor="middle">confirms → new/updated rule</text>
+        <rect class="jtag" x="60" y="640" width="40" height="18" />
+        <text class="jtag-text" x="80" y="653" text-anchor="middle">J4</text>
+
+        <!-- feedback loop 2: review -> storage (write back) -->
+        <polyline class="loop-line" points="820,858 1110,858 1110,749 902,749" marker-end="url(#arrowAccent)" />
+        <text class="loop-text" x="1115" y="600" transform="rotate(-90 1115,600)" text-anchor="middle">resolved → written back</text>
+
+        <!-- review -> api -->
+        <line class="flow-line" x1="600" y1="894" x2="600" y2="942" marker-end="url(#arrowMain)" />
+
+        <!-- ROW 7: API -->
+        <rect class="box" x="440" y="942" width="320" height="56" />
+        <text class="title-text" x="600" y="964" text-anchor="middle">API</text>
+        <text class="mono-text" x="600" y="982" text-anchor="middle">/transactions · /accounts · /assets · /summary</text>
+
+        <!-- bus -->
+        <line class="flow-line" x1="600" y1="998" x2="600" y2="1020" />
+        <line class="flow-line" x1="144" y1="1020" x2="1056" y2="1020" />
+        <line class="flow-line" x1="144" y1="1020" x2="144" y2="1048" marker-end="url(#arrowMain)" />
+        <line class="flow-line" x1="372" y1="1020" x2="372" y2="1048" marker-end="url(#arrowMain)" />
+        <line class="flow-line" x1="600" y1="1020" x2="600" y2="1048" marker-end="url(#arrowMain)" />
+        <line class="flow-line" x1="828" y1="1020" x2="828" y2="1048" marker-end="url(#arrowMain)" />
+        <line class="flow-line" x1="1056" y1="1020" x2="1056" y2="1048" marker-end="url(#arrowMain)" />
+
+        <!-- ROW 8: Dashboard -->
+        <rect class="box" x="40" y="1048" width="208" height="100" />
+        <rect class="jtag" x="52" y="1056" width="40" height="18" />
+        <text class="jtag-text" x="72" y="1069" text-anchor="middle">J2</text>
+        <text class="title-text" x="144" y="1108" text-anchor="middle">Income vs</text>
+        <text class="title-text" x="144" y="1124" text-anchor="middle">Expense</text>
+
+        <rect class="box" x="268" y="1048" width="208" height="100" />
+        <rect class="jtag" x="280" y="1056" width="40" height="18" />
+        <text class="jtag-text" x="300" y="1069" text-anchor="middle">J3</text>
+        <text class="title-text" x="372" y="1108" text-anchor="middle">Category</text>
+        <text class="title-text" x="372" y="1124" text-anchor="middle">Drill-in</text>
+
+        <rect class="box" x="496" y="1048" width="208" height="100" />
+        <rect class="jtag" x="508" y="1056" width="40" height="18" />
+        <text class="jtag-text" x="528" y="1069" text-anchor="middle">J5</text>
+        <text class="title-text" x="600" y="1108" text-anchor="middle">Needs-Review</text>
+        <text class="title-text" x="600" y="1124" text-anchor="middle">UI</text>
+
+        <rect class="box" x="724" y="1048" width="208" height="100" />
+        <rect class="jtag" x="736" y="1056" width="40" height="18" />
+        <text class="jtag-text" x="756" y="1069" text-anchor="middle">J6</text>
+        <text class="title-text" x="828" y="1108" text-anchor="middle">Portfolio /</text>
+        <text class="title-text" x="828" y="1124" text-anchor="middle">Asset View</text>
+
+        <rect class="box" x="952" y="1048" width="208" height="100" />
+        <rect class="jtag" x="964" y="1056" width="40" height="18" />
+        <text class="jtag-text" x="984" y="1069" text-anchor="middle">J7</text>
+        <text class="title-text" x="1056" y="1108" text-anchor="middle">Tax Refund</text>
+        <text class="title-text" x="1056" y="1124" text-anchor="middle">(YoY)</text>
+      </svg>
+    </div>
+    <figcaption>
+      Solid lines are the live upload path a statement takes every time; the dashed lane on the
+      left is the one-time historical backfill, merging into the same store and review queue. The
+      two teal loops are the only feedback in the system — a resolved review-queue item can write a
+      new categorisation rule (closing FR-9's "learn from corrections") or a confirmed match back
+      into storage.
+    </figcaption>
+  </figure>
+
+  <div class="legend">
+    <h2>The ten journeys</h2>
+
+    <div class="jrow"><span class="jnum">J1</span><span class="jname">Upload a statement</span><span class="jfr">FR-1–4</span></div>
+    <div class="jrow"><span class="jnum">J2</span><span class="jname">View income vs. expense</span><span class="jfr">FR-11–13</span></div>
+    <div class="jrow"><span class="jnum">J3</span><span class="jname">Drill into a category</span><span class="jfr">FR-14</span></div>
+    <div class="jrow"><span class="jnum">J4</span><span class="jname">Correct a miscategorised transaction</span><span class="jfr">FR-9, FR-15</span></div>
+    <div class="jrow"><span class="jnum">J5</span><span class="jname">Resolve the needs-review queue</span><span class="jfr">FR-10, FR-9e tier 2</span></div>
+    <div class="jrow"><span class="jnum">J6</span><span class="jname">View the investment/asset portfolio</span><span class="jfr">FR-15a</span></div>
+    <div class="jrow"><span class="jnum">J7</span><span class="jname">Track ATO tax refund year-on-year</span><span class="jfr">§4.2 exception</span></div>
+    <div class="jrow"><span class="jnum">J8</span><span class="jname">One-time historical backfill</span><span class="jfr">FR-7a, §4.2.1</span></div>
+    <div class="jrow"><span class="jnum">J9</span><span class="jname">A transfer chain across 3+ accounts</span><span class="jfr">FR-9e</span></div>
+    <div class="jrow"><span class="jnum">J10</span><span class="jname">A dependent's payment isn't a Transfer</span><span class="jfr">FR-9d</span></div>
+
+    <div class="key">
+      <span><span class="swatch solid"></span> live upload path</span>
+      <span><span class="swatch dash"></span> one-time backfill</span>
+      <span><span class="swatch loop"></span> feedback loop</span>
+      <span><span class="swatch warn"></span> flagged for human review</span>
+    </div>
+  </div>
+
+  <footer>
+    Derived from <code>docs/design-journeys.md</code> and <code>docs/design-data-model-api.md</code>
+    — AI Personal Budgeting &amp; Expense Categorisation System, step 5 design phase.
+  </footer>
+
+</div>

@@ -5,5 +5,8 @@ sqlalchemy
 streamlit
 python-multipart
 pydantic
-openai
+anthropic
+openpyxl
+pytest
+httpx
 
