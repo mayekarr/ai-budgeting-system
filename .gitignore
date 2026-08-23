@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+finance.db
+.pytest_cache/
+
+# Real personal bank statement / categorisation data — never commit, local-only.
+transaction-files/*.xlsx
+docs/AU COST - Manual categorisation.xlsx
