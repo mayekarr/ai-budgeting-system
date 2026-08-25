@@ -40,3 +40,18 @@ def get_transactions(
     response = httpx.get(f"{BASE_URL}/transactions", params=params, timeout=10.0)
     response.raise_for_status()
     return response.json()
+
+
+def correct_transaction_category(
+    transaction_id: int,
+    *,
+    category: str,
+    subcategory: Optional[str] = None,
+) -> dict:
+    response = httpx.patch(
+        f"{BASE_URL}/transactions/{transaction_id}",
+        json={"category": category, "subcategory": subcategory},
+        timeout=10.0,
+    )
+    response.raise_for_status()
+    return response.json()
