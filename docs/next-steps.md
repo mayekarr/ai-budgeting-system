@@ -1,7 +1,7 @@
 # Next Steps
 
 Status: Active
-Last updated: 2026-08-23
+Last updated: 2026-08-25
 Companion to: `docs/product-requirements.md` (Draft v9) — read that first for full requirements
 detail; this doc is a resumable to-do list, not a requirements source of truth.
 
@@ -225,8 +225,55 @@ Requirements gathering is well underway. Decided so far (all detailed in
       not None` is `True` — the old `row.get("transfer_group_id") is not None` check would have
       badged every non-transfer row too, reproduced directly before the exclusion fix removed the
       code path. 100 tests passing.
-   3. **J4 — Correct a miscategorisation**. `PATCH /transactions/{id}` + `CategorisationRule`
-      write-back, correction control on the drill-in page.
+   3. ~~**J4 — Correct a miscategorisation**~~ — **Done** 2026-08-25, on branch
+      `feature/j4-correct-miscategorisation`. `PATCH /transactions/{id}` (`backend/api.py`) accepts
+      `category` (required) and `subcategory` (optional); validates the pair against
+      `categorisation/taxonomy.py` (400 if invalid), 404s on an unknown id, clears `needs_review`
+      and sets `confidence_score=1.0` on success (the correction resolves the exact uncertainty
+      FR-10's flag exists for). Writes/updates a `source=user_correction` `CategorisationRule` —
+      exact match on the transaction's `raw_description`, priority `0` (below every seeded/
+      llm_promoted rule, so a same-text future match takes the correction over anything automatic)
+      — closing FR-9's "learn from corrections" loop the same way `claude_fallback.py`'s LLM
+      promotion already does. Deliberately **not** retroactive: only future transactions with the
+      same raw description benefit, matching FR-9's wording; already-imported rows with the same
+      text are left as-is.
+      `frontend/pages/2_Category_Drill_in.py` gained a "Correct a transaction's category" section
+      below the table (shown only when the table isn't empty): a transaction picker over the
+      currently-displayed rows, a category dropdown (`categorisation/taxonomy.CATEGORIES`), a
+      subcategory dropdown scoped to the chosen category (reset via the same
+      last-seen-value-in-session_state pattern the category filter above it already uses, since a
+      category change can leave the subcategory widget's persisted key value outside the new
+      option list), and a save button calling the new `frontend/api_client.correct_transaction_category`.
+      Scope deliberately excludes `is_refund`/`transfer_group_id` correction — the design doc lists
+      both as PATCH-settable, but they're J5's concern (resolving review-queue items), not J4's.
+      16 new tests (116 total): 9 backend (`tests/test_api_transaction_correction.py` — correction,
+      rule write-back incl. update-not-duplicate and outranking a seeded rule, validation, 404) + 7
+      frontend `AppTest` (`tests/test_frontend_transaction_correction.py` — control visibility,
+      subcategory scoping, save call args incl. no-subcategory→`None`, success/error messaging).
+      One `AppTest` gotcha hit and resolved during the frontend tests: `Selectbox.select_index(i)`
+      sets the widget's value to `options[i]` (the *rendered label string*), not the underlying
+      option object — fine for plain-string options, but breaks a `format_func`-based selectbox
+      (like the transaction picker here, which maps id→label) on the next rerun, since `format_func`
+      gets called again with the label instead of the id. Tests use `.select(<id>)` instead.
+      `/code-review medium` run against the full diff: 0 findings.
+      **Second `/code-review` pass (default effort), same day — 3 findings, 2 fixed:** the
+      find-or-create lookup for the `user_correction` rule used a case-sensitive, untrimmed `==`
+      comparison, diverging from `categorisation/rules.py`'s own exact-match semantics
+      (`pattern_matches`, which is case-insensitive/trimmed) — two corrections whose
+      `raw_description` differed only by case/whitespace would wrongly create two overlapping
+      rules; fixed with a `func.upper(func.trim(...))` comparison matching that canonical
+      semantics (test added). The drill-in correction handler showed a success toast but never
+      refetched, so the table above (built from a fetch that ran *before* the button handler in
+      that same script pass) kept showing the pre-correction category until some later, unrelated
+      interaction happened to trigger another fetch — fixed by rerunning (`st.rerun()`) after a
+      successful save, with the success message deferred via `session_state` so it still renders
+      after the rerun restarts the script from the top (test added, asserts the extra fetch).
+      **Third finding, deliberately not fixed, documented in `backend/api.py`**: the same
+      find-or-create has a check-then-act race — two concurrent `PATCH` requests for two
+      transactions sharing a `raw_description` could both miss the existing rule and both insert,
+      since there's no unique constraint on `(pattern, match_type, source)`. Not worth the added
+      complexity for a single local user driving one correction at a time through the dashboard
+      (NFR-1); revisit if this ever gets a second concurrent caller. 118 tests passing.
    4. **J5 — Needs-review queue**. Forces Tier-2 heuristic matching + `TransferGroup` to mature
       (this is where the 3-account chain logic gets fully exercised end-to-end), Needs-Review page.
    5. **J6 — Portfolio/asset view**. `Asset` entity, `GET /assets` endpoints, Portfolio page.

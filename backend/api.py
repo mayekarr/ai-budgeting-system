@@ -9,18 +9,25 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from categorisation.claude_fallback import categorise_with_fallback
 from categorisation.rules import match_rule
 from categorisation.seed_rules import seed_rules_if_empty
+from categorisation.taxonomy import is_valid_category
 from ingestion.account_resolution import resolve_account
 from ingestion.nab_format import NabFormatError, parse_nab_format
 from transfers.detection import process_transfer_detection
 from transfers.refunds import detect_refund
 
 from .database import SessionLocal, bulk_save_transactions, create_tables, engine  # noqa: F401  (engine kept for test monkeypatching)
-from .models import Transaction
+from .models import CategorisationRule, Transaction
+
+# Below any real seeded/llm_promoted rule priority (categorisation/seed_rules.py starts at 1;
+# claude_fallback.py promotes at 500) — an explicit user correction (FR-9) must win a same-text
+# exact-match tie over anything automatic.
+USER_CORRECTION_RULE_PRIORITY = 0
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +71,11 @@ class TransactionOut(BaseModel):
     source: str
     needs_review: bool
     confidence_score: float | None
+
+
+class TransactionCorrection(BaseModel):
+    category: str
+    subcategory: str | None = None
 
 
 class UploadResult(BaseModel):
@@ -231,6 +243,68 @@ def list_transactions(
     records = q.order_by(Transaction.date.desc(), Transaction.id.desc()).all()
     logger.info("Fetched %d transactions.", len(records))
     return records
+
+
+@app.patch("/transactions/{transaction_id}", response_model=TransactionOut)
+def correct_transaction(
+    transaction_id: int,
+    correction: TransactionCorrection,
+    db: Session = Depends(get_session),
+) -> Transaction:
+    """
+    Manual category correction (J4, FR-9/FR-15). Writes/updates a `source=user_correction`
+    CategorisationRule keyed on the transaction's exact raw_description, so a future transaction
+    with the same text auto-categorises the same way instead of repeating the same mistake — the
+    same learning mechanism claude_fallback.py uses for a confident LLM result.
+    """
+    tx = db.get(Transaction, transaction_id)
+    if tx is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found.")
+    if not is_valid_category(correction.category, correction.subcategory):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid category/subcategory: {correction.category}/{correction.subcategory}",
+        )
+
+    tx.category = correction.category
+    tx.subcategory = correction.subcategory
+    tx.needs_review = False
+    tx.confidence_score = 1.0
+
+    # Case-insensitive, trimmed comparison — matches categorisation/rules.py's own exact-match
+    # semantics (pattern_matches), so two corrections whose raw_description differs only by case
+    # or surrounding whitespace are recognised as the same rule instead of creating duplicates.
+    # Known, deliberately-unhandled race: this find-or-create isn't transactionally safe against a
+    # second PATCH for the same raw_description arriving before this one commits (no unique
+    # constraint on pattern/match_type/source) — both would insert. Not worth the added complexity
+    # for a single local user driving one correction at a time through the dashboard (NFR-1); revisit
+    # if this ever gets a second concurrent caller.
+    rule = (
+        db.query(CategorisationRule)
+        .filter(
+            func.upper(func.trim(CategorisationRule.pattern)) == tx.raw_description.strip().upper(),
+            CategorisationRule.match_type == "exact",
+            CategorisationRule.source == "user_correction",
+        )
+        .first()
+    )
+    if rule is None:
+        rule = CategorisationRule(
+            pattern=tx.raw_description,
+            match_type="exact",
+            priority=USER_CORRECTION_RULE_PRIORITY,
+            source="user_correction",
+            is_active=True,
+        )
+        db.add(rule)
+    rule.category = correction.category
+    rule.subcategory = correction.subcategory
+
+    db.commit()
+    db.refresh(tx)
+    logger.info("Corrected transaction %d to %s/%s; user_correction rule updated.",
+                transaction_id, correction.category, correction.subcategory)
+    return tx
 
 
 @app.get("/summary", response_model=SummaryOut)
