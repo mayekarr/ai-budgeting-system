@@ -473,3 +473,29 @@ def test_tier2_low_band_preserves_a_still_live_low_confidence_category_reason(se
     session.refresh(tx_a)
     assert tx_a.type == "Expense"  # not auto-tagged
     assert tx_a.needs_review_reason == LOW_CONFIDENCE_CATEGORY
+
+
+def test_tier2_genuine_high_band_tie_is_downgraded_to_medium_not_silently_auto_linked(session):
+    # /code-review finding: two candidates tying exactly on every scoring dimension at High band
+    # must not be resolved by picking whichever the DB happens to return first with zero review
+    # flag — High claims a certainty a genuine tie doesn't have.
+    a = _account(session, "A")
+    b = _account(session, "B")
+    c = _account(session, "C")
+    tx_a = _tx(session, a, date(2026, 8, 5), -500.00, "Payment out")
+    tx_b = _tx(session, b, date(2026, 8, 5), 500.00, "Payment in 1")
+    tx_c = _tx(session, c, date(2026, 8, 5), 500.00, "Payment in 2")
+
+    process_transfer_detection(session, tx_a)
+
+    session.refresh(tx_a)
+    session.refresh(tx_b)
+    session.refresh(tx_c)
+    # Linked to exactly one of the two tied candidates (whichever), but as Medium (flagged),
+    # not silently auto-approved as if it were unambiguous.
+    linked_to_b = tx_b.transfer_group_id is not None
+    linked_to_c = tx_c.transfer_group_id is not None
+    assert linked_to_b != linked_to_c  # exactly one, not both, not neither
+    assert tx_a.type == "Transfer"
+    assert tx_a.needs_review is True
+    assert tx_a.needs_review_reason == TRANSFER_MATCH

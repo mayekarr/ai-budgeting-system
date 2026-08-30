@@ -9,7 +9,12 @@ from sqlalchemy.orm import sessionmaker
 
 import backend.api as api_module
 from backend.models import Account, Base, Transaction, TransferGroup
-from backend.needs_review_reasons import REFUND_AMBIGUITY, TRANSFER_MATCH
+from backend.needs_review_reasons import (
+    LOW_CONFIDENCE_CATEGORY,
+    REFUND_AMBIGUITY,
+    TRANSFER_MATCH,
+    UNRECOGNISED_ACCOUNT,
+)
 
 
 @pytest.fixture()
@@ -139,6 +144,24 @@ def test_confirm_transfer_match_clears_review_flag_on_both_legs(client):
         other = session.get(Transaction, tx_b_id)
         assert other.needs_review is False
         assert other.needs_review_reason is None
+
+
+def test_confirm_transfer_match_preserves_a_sibling_legs_unrelated_reason(client):
+    # /code-review finding: confirming one leg's transfer match must not silently wipe a sibling
+    # leg's unrelated, still-unresolved reason (e.g. unrecognised_account).
+    api_client, SessionLocal, account_ids = client
+    tx_a_id, tx_b_id, _ = _seed_linked_pair(SessionLocal, account_ids, tier=2, confidence=0.6, needs_review=True)
+    with SessionLocal() as session:
+        other = session.get(Transaction, tx_b_id)
+        other.needs_review_reason = UNRECOGNISED_ACCOUNT
+        session.commit()
+
+    api_client.patch(f"/transactions/{tx_a_id}", json={"confirm_transfer_match": True})
+
+    with SessionLocal() as session:
+        other = session.get(Transaction, tx_b_id)
+        assert other.needs_review is True
+        assert other.needs_review_reason == UNRECOGNISED_ACCOUNT
 
 
 def test_confirm_transfer_match_without_a_link_is_rejected(client):
@@ -271,6 +294,24 @@ def test_reject_transfer_match_unlinks_an_auto_tagged_pair_and_reverts_type(clie
         assert session.get(TransferGroup, group_id) is None  # orphaned group cleaned up
 
 
+def test_reject_transfer_match_preserves_a_sibling_legs_unrelated_reason(client):
+    api_client, SessionLocal, account_ids = client
+    tx_a_id, tx_b_id, _ = _seed_linked_pair(SessionLocal, account_ids, tier=2, confidence=0.6, needs_review=True)
+    with SessionLocal() as session:
+        other = session.get(Transaction, tx_b_id)
+        other.needs_review_reason = UNRECOGNISED_ACCOUNT
+        session.commit()
+
+    api_client.patch(f"/transactions/{tx_a_id}", json={"reject_transfer_match": True})
+
+    with SessionLocal() as session:
+        other = session.get(Transaction, tx_b_id)
+        # Unlinked (reverted to a plain Income row) but the unrelated account concern survives.
+        assert other.transfer_group_id is None
+        assert other.needs_review is True
+        assert other.needs_review_reason == UNRECOGNISED_ACCOUNT
+
+
 def test_reject_transfer_match_on_an_unlinked_suggestion_just_clears_the_flag(client):
     api_client, SessionLocal, (a, _) = client
     tx_id = _seed_tx(SessionLocal, a, type="Expense", needs_review=True, needs_review_reason=TRANSFER_MATCH)
@@ -280,6 +321,21 @@ def test_reject_transfer_match_on_an_unlinked_suggestion_just_clears_the_flag(cl
     assert body["type"] == "Expense"  # untouched
     assert body["transfer_group_id"] is None
     assert body["needs_review"] is False
+
+
+def test_reject_transfer_match_on_an_unlinked_suggestion_preserves_a_still_live_reason(client):
+    # Dismissing a Low suggestion doesn't touch this row's own category/type, so an existing
+    # low_confidence_category flag (already preserved by transfers/detection.py, since Low never
+    # supersedes it) must stay exactly as live as it was.
+    api_client, SessionLocal, (a, _) = client
+    tx_id = _seed_tx(
+        SessionLocal, a, type="Expense", needs_review=True, needs_review_reason=LOW_CONFIDENCE_CATEGORY
+    )
+
+    body = api_client.patch(f"/transactions/{tx_id}", json={"reject_transfer_match": True}).json()
+
+    assert body["needs_review"] is True
+    assert body["needs_review_reason"] == LOW_CONFIDENCE_CATEGORY
 
 
 # --- GET /transactions/{id}/suggested-transfer-match --------------------------------------------
@@ -295,6 +351,21 @@ def test_suggested_transfer_match_returns_the_best_current_candidate(client):
 
     assert body is not None
     assert body["id"] == tx_b_id
+
+
+def test_suggested_transfer_match_returns_null_for_an_already_linked_transaction(client):
+    # /code-review finding: calling this on an already-linked row (its own docstring says it's
+    # only for the not-yet-linked case) must not surface an unrelated transaction as a false
+    # suggestion.
+    api_client, SessionLocal, account_ids = client
+    tx_a_id, _, _ = _seed_linked_pair(SessionLocal, account_ids, tier=2, confidence=0.6, needs_review=True)
+    # An unrelated, unlinked transaction that would otherwise look like a plausible candidate.
+    _seed_tx(SessionLocal, account_ids[1], date=date(2026, 8, 5), amount=100.0)
+
+    response = api_client.get(f"/transactions/{tx_a_id}/suggested-transfer-match")
+
+    assert response.status_code == 200
+    assert response.json() is None
 
 
 def test_suggested_transfer_match_returns_null_when_none_exists(client):

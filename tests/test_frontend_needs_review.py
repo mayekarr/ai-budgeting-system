@@ -85,6 +85,25 @@ def test_transfer_match_already_linked_shows_confirm_and_reject():
     assert at.button(key="reject_linked_1") is not None
 
 
+def test_transfer_match_already_linked_shows_the_matched_counterpart():
+    # /code-review finding: confirming a Medium match must not be blind — the counterpart's
+    # details should be shown, not just the bare group id.
+    tx_row = _tx(1, "transfer_match", transfer_group_id=7)
+    counterpart_row = _tx(99, "transfer_match", transfer_group_id=7, raw_description="Matched leg")
+
+    def _fake_get_transactions(*args, **kwargs):
+        if kwargs.get("transfer_group_id") == 7:
+            return [tx_row, counterpart_row]
+        return [tx_row]
+
+    with patch("frontend.api_client.get_transactions", side_effect=_fake_get_transactions):
+        at = _open_needs_review()
+        at.run()
+
+    assert not at.exception
+    assert any("Matched leg" in c.value for c in at.caption)
+
+
 def test_transfer_match_confirm_linked_calls_confirm_transfer_match():
     items = [_tx(1, "transfer_match", transfer_group_id=7)]
     with patch("frontend.api_client.get_transactions", return_value=items):

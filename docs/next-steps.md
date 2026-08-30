@@ -370,6 +370,43 @@ Requirements gathering is well underway. Decided so far (all detailed in
       CLAUDE.md requires updating the requirements doc too when a decision changes it, so
       §4.1 now carries the same explanation inline (a `~~struck~~` + **Built** note, matching this
       project's established doc-update pattern). 159 tests passing after this pass.
+      **Third `/code-review` pass (default effort), same day — 10 findings; 8 fixed, 2 already
+      documented/confirmed intended:**
+      `_confirm_transfer_with_id` didn't validate the counterpart was a real, distinct opposite-
+      sign transaction on a different account — a same-id/same-account/same-sign counterpart would
+      pass every prior check and produce a corrupted single-real-member `TransferGroup`; now
+      rejected with 400 (3 tests added). `render_category_correction_widget`'s reset-on-change
+      guard fired unconditionally on first render (its `last_seen_key` marker isn't set yet), so
+      it always blanked the subcategory even when `default_category` matched the transaction's
+      existing, correct category — silently dropping an existing subcategory on save; fixed by
+      adding a `default_subcategory` param and seeding it alongside the category on first render.
+      `_confirm_transfer_match`/`_confirm_transfer_with_id`/`_reject_transfer_match` all
+      unconditionally wiped `needs_review_reason` on every group member — the exact "sibling leg's
+      unrelated reason gets clobbered" bug class the detection-time supersession fix (above) exists
+      to prevent, just not applied to these manual action paths; fixed via a shared
+      `_clear_transfer_review_flag` helper consulting the same precedence rule (4 tests added).
+      That precedence rule itself was duplicated across two unrelated mechanisms (an if/elif chain
+      in the upload handler vs. a frozenset + gate in detection) — consolidated into one ranked
+      table (`highest_priority_reason`/`should_supersede` in `backend/needs_review_reasons.py`)
+      both call sites now consult, so a future reason's precedence can't be decided inconsistently
+      in two places. `_best_tier2_candidate` broke a genuine tie (e.g. two same-amount/same-day
+      candidates on different accounts) via arbitrary DB row order, silently auto-linking a High
+      match with no review flag when picking the true counterpart was actually ambiguous — fixed
+      by detecting ties and downgrading to Medium (auto-linked but flagged) instead (test added).
+      `GET /transactions/{id}/suggested-transfer-match` had no guard against being called on an
+      already-linked row, which could surface an unrelated transaction as a false suggestion — now
+      returns null immediately for a linked row (test added). The Needs-Review page's already-
+      linked (Medium) branch showed only a bare group id, asking the user to confirm blind — now
+      fetches and shows the matched counterpart's date/description/amount via the existing
+      `GET /transactions?transfer_group_id=...` filter (test added). The duplicated
+      `needs_review=False; needs_review_reason=None` pattern (6 call sites) was folded into the
+      same shared helper above. **Confirmed already covered, no further change**: the High-band
+      "stale reason on an already-needs_review row that gets auto-linked" gap is the same one this
+      doc already discloses just above; a Low-band match's inability to surface a second, distinct
+      reason alongside an existing one (single-field schema) is the accepted, documented
+      consequence of `needs_review_reason` being one field, not a new bug — the precedence-table
+      consolidation just makes that tradeoff more clearly intentional than before. 165 tests
+      passing after this pass.
    5. **J6 — Portfolio/asset view**. `Asset` entity, `GET /assets` endpoints, Portfolio page.
    6. **J7 — Tax refund (YoY)**. A filter on top of J2's summary endpoint + a chip on Overview.
    7. **J8 — Historical backfill**. Last, unchanged reasoning: needs the live pipeline proven on

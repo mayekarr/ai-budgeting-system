@@ -28,6 +28,8 @@ from .needs_review_reasons import (
     REFUND_AMBIGUITY,
     TRANSFER_MATCH,
     UNRECOGNISED_ACCOUNT,
+    highest_priority_reason,
+    should_supersede,
 )
 
 # Below any real seeded/llm_promoted rule priority (categorisation/seed_rules.py starts at 1;
@@ -184,17 +186,14 @@ async def upload_transactions(
             tx_type = "Income"
             cat_needs_review = False
 
-        # Priority when more than one signal is ambiguous at once: an unrecognised account is the
-        # most foundational concern (it affects what the row even *means*), then refund ambiguity,
-        # then a merely-low-confidence category — matching backend/needs_review_reasons.py.
-        if resolved.needs_review:
-            needs_review_reason = UNRECOGNISED_ACCOUNT
-        elif refund_decision.needs_review:
-            needs_review_reason = REFUND_AMBIGUITY
-        elif cat_needs_review:
-            needs_review_reason = LOW_CONFIDENCE_CATEGORY
-        else:
-            needs_review_reason = None
+        # Priority when more than one signal is ambiguous at once, per the single shared table in
+        # backend/needs_review_reasons.py (also consulted by transfers/detection.py's later
+        # supersession decision, so the two stay provably consistent).
+        needs_review_reason = highest_priority_reason(
+            UNRECOGNISED_ACCOUNT if resolved.needs_review else None,
+            REFUND_AMBIGUITY if refund_decision.needs_review else None,
+            LOW_CONFIDENCE_CATEGORY if cat_needs_review else None,
+        )
 
         to_persist.append(
             {
@@ -307,6 +306,11 @@ def get_suggested_transfer_match(
     tx = db.get(Transaction, transaction_id)
     if tx is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found.")
+    # Already linked (Tier-1, or Tier-2 High/Medium) — there's no "suggestion" to make, this row
+    # isn't the not-yet-linked case this endpoint exists for (/code-review finding: calling it on
+    # an already-linked row could otherwise surface an unrelated transaction as a false suggestion).
+    if tx.transfer_group_id is not None:
+        return None
     return find_suggested_transfer_match(db, tx)
 
 
@@ -408,6 +412,24 @@ def _apply_category_correction(db: Session, tx: Transaction, category: str, subc
                 tx.id, category, subcategory)
 
 
+def _clear_transfer_review_flag(member: Transaction, *, type_changed: bool) -> None:
+    """
+    Resolves the review flag a transfer action (confirm/link/reject) addresses — using the same
+    precedence rule transfers/detection.py's supersession uses, not a blanket clear. A group member
+    can carry an unrelated, still-live reason (e.g. unrecognised_account, which never gets
+    superseded regardless of type_changed) — resolving one leg's transfer match must not silently
+    wipe a sibling leg's unrelated, still-unresolved concern out of the queue (/code-review finding;
+    the exact bug class the detection-time supersession rule exists to prevent, previously not
+    applied to these manual action paths). When this action changes `type` to/from Transfer
+    (type_changed=True), a lesser reason (low_confidence_category/refund_ambiguity) is moot too and
+    is cleared along with it, same as the automatic Medium-band case.
+    """
+    reason = member.needs_review_reason
+    if reason is None or reason == TRANSFER_MATCH or (type_changed and should_supersede(reason, TRANSFER_MATCH)):
+        member.needs_review = False
+        member.needs_review_reason = None
+
+
 def _confirm_transfer_match(tx: Transaction) -> None:
     """Tier-2 Medium: already linked (auto-tagged) — just clear the soft-confirmation flag on
     every leg of the group together (docs/design-logic-and-ux.md §3.2)."""
@@ -417,8 +439,9 @@ def _confirm_transfer_match(tx: Transaction) -> None:
             detail="Transaction has no transfer match to confirm.",
         )
     for member in tx.transfer_group.members:
-        member.needs_review = False
-        member.needs_review_reason = None
+        # type isn't changing here — it was already set Transfer when this Medium match was
+        # auto-linked; a lesser reason would already have been superseded at that point.
+        _clear_transfer_review_flag(member, type_changed=False)
 
 
 def _confirm_transfer_with_id(db: Session, tx: Transaction, counterpart_id: int) -> None:
@@ -457,8 +480,9 @@ def _confirm_transfer_with_id(db: Session, tx: Transaction, counterpart_id: int)
     for member in (tx, counterpart):
         member.transfer_group = group
         member.type = "Transfer"
-        member.needs_review = False
-        member.needs_review_reason = None
+        # This IS the change from non-Transfer to Transfer (a Low match is never auto-linked) —
+        # a preserved low_confidence_category/refund_ambiguity becomes moot right now.
+        _clear_transfer_review_flag(member, type_changed=True)
 
 
 def _reject_transfer_match(db: Session, tx: Transaction) -> None:
@@ -472,12 +496,11 @@ def _reject_transfer_match(db: Session, tx: Transaction) -> None:
         for member in list(group.members):
             member.transfer_group_id = None
             member.type = "Income" if member.amount > 0 else "Expense"
-            member.needs_review = False
-            member.needs_review_reason = None
+            _clear_transfer_review_flag(member, type_changed=True)  # Transfer -> Income/Expense
         db.delete(group)
     else:
-        tx.needs_review = False
-        tx.needs_review_reason = None
+        # Dismissing a Low suggestion — nothing about this row's own type/category changes.
+        _clear_transfer_review_flag(tx, type_changed=False)
 
 
 @app.get("/summary", response_model=SummaryOut)

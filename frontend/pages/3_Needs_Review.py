@@ -54,7 +54,19 @@ def _render_transfer_match(tx: dict) -> None:
     tx_id = tx["id"]
     if tx.get("transfer_group_id") is not None:
         # Tier-2 Medium: already auto-linked as Transfer — a soft, non-blocking confirmation.
-        st.caption(f"Auto-linked as a Transfer (group {tx['transfer_group_id']}).")
+        # Show the other leg(s), not just the bare group id, so the user isn't confirming blind
+        # (/code-review finding — GET /transactions?transfer_group_id=... exists exactly for this).
+        try:
+            group_members = get_transactions(transfer_group_id=tx["transfer_group_id"])
+        except Exception as exc:  # pylint: disable=broad-except
+            group_members = []
+            st.error(f"Could not load the matched transaction: {exc}")
+        other_legs = [m for m in group_members if m["id"] != tx_id]
+        if other_legs:
+            for leg in other_legs:
+                st.caption(f"Matched with: {leg['date']} · {leg['raw_description']} · ${leg['amount']:.2f}")
+        else:
+            st.caption(f"Auto-linked as a Transfer (group {tx['transfer_group_id']}).")
         col1, col2 = st.columns(2)
         if col1.button("Confirm", key=f"confirm_linked_{tx_id}"):
             confirm_transfer_match(tx_id)
@@ -115,6 +127,7 @@ def _render_low_confidence_category(tx: dict) -> None:
         subcategory_key=f"needs_review_subcategory_{tx_id}",
         last_seen_key=f"_needs_review_last_seen_category_{tx_id}",
         default_category=tx.get("category"),
+        default_subcategory=tx.get("subcategory"),
     )
 
     if st.button("Save category", key=f"save_category_{tx_id}"):

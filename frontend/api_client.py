@@ -31,6 +31,7 @@ def get_transactions(
     date_to: Optional[date] = None,
     needs_review: Optional[bool] = None,
     needs_review_reason: Optional[str] = None,
+    transfer_group_id: Optional[int] = None,
 ) -> list[dict]:
     params = {}
     if category is not None:
@@ -43,6 +44,8 @@ def get_transactions(
         params["needs_review"] = needs_review
     if needs_review_reason is not None:
         params["needs_review_reason"] = needs_review_reason
+    if transfer_group_id is not None:
+        params["transfer_group_id"] = transfer_group_id
     response = httpx.get(f"{BASE_URL}/transactions", params=params, timeout=10.0)
     response.raise_for_status()
     return response.json()

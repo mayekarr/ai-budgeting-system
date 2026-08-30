@@ -13,6 +13,7 @@ def render_category_correction_widget(
     subcategory_key: str,
     last_seen_key: str,
     default_category: Optional[str] = None,
+    default_subcategory: Optional[str] = None,
     category_label: str = "Category",
     subcategory_label: str = "Subcategory",
 ) -> tuple[str, Optional[str]]:
@@ -28,7 +29,20 @@ def render_category_correction_widget(
     Returns the currently selected (category, subcategory-or-None).
     """
     if default_category is not None and category_key not in st.session_state:
-        st.session_state[category_key] = default_category if default_category in CATEGORIES else CATEGORIES[0]
+        seeded_category = default_category if default_category in CATEGORIES else CATEGORIES[0]
+        st.session_state[category_key] = seeded_category
+        # Seed the subcategory and last-seen marker together with the category, on this same
+        # first render — otherwise the reset-on-change guard below fires unconditionally on first
+        # render (last_seen_key isn't set yet, so it never equals seeded_category) and silently
+        # wipes a still-valid default subcategory back to "" before the user ever touches anything
+        # (/code-review finding: this could drop an already-correct subcategory on save).
+        if subcategory_key not in st.session_state:
+            valid_subcategories = TAXONOMY[seeded_category]
+            st.session_state[subcategory_key] = (
+                default_subcategory if default_subcategory in valid_subcategories else ""
+            )
+        if last_seen_key not in st.session_state:
+            st.session_state[last_seen_key] = seeded_category
 
     selected_category = st.selectbox(category_label, CATEGORIES, key=category_key)
 

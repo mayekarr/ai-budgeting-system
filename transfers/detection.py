@@ -29,7 +29,7 @@ from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from backend.models import Account, AccountAlias, Transaction, TransferGroup
-from backend.needs_review_reasons import LOW_CONFIDENCE_CATEGORY, REFUND_AMBIGUITY, TRANSFER_MATCH
+from backend.needs_review_reasons import TRANSFER_MATCH, should_supersede
 from transfers.aliases import alias_matches_text
 
 _REFERENCE_TOKEN_RE = re.compile(r"\b[A-Za-z]{1,3}\d{6,}\b")
@@ -205,14 +205,28 @@ def _find_tier2_candidates(session: Session, tx: Transaction) -> list[tuple[Tran
 _BAND_RANK = {"high": 2, "medium": 1, "low": 0}
 
 
+def _tier2_score(tx: Transaction, pair: tuple[Transaction, str]) -> tuple[int, int, float]:
+    candidate, band = pair
+    return (_BAND_RANK[band], -abs((candidate.date - tx.date).days), -abs(abs(candidate.amount) - abs(tx.amount)))
+
+
 def _best_tier2_candidate(session: Session, tx: Transaction) -> Optional[tuple[Transaction, str]]:
     candidates = _find_tier2_candidates(session, tx)
     if not candidates:
         return None
-    return max(
-        candidates,
-        key=lambda pair: (_BAND_RANK[pair[1]], -abs((pair[0].date - tx.date).days), -abs(abs(pair[0].amount) - abs(tx.amount))),
-    )
+
+    scored = [(pair, _tier2_score(tx, pair)) for pair in candidates]
+    best_score = max(score for _, score in scored)
+    tied = [pair for pair, score in scored if score == best_score]
+    candidate, band = tied[0]
+
+    # A genuine tie (e.g. two same-amount, same-day candidates on different accounts) must not be
+    # silently auto-linked to whichever the DB happens to return first — High confidence claims
+    # certainty a tie doesn't have. Downgrade to Medium so it's auto-linked but still surfaced for
+    # confirmation, rather than picking an arbitrary winner with zero review flag.
+    if len(tied) > 1 and band == "high":
+        band = "medium"
+    return candidate, band
 
 
 _TIER2_MEDIUM_CONFIDENCE = 0.6
@@ -240,28 +254,28 @@ def _process_tier2(session: Session, tx: Transaction) -> None:
     session.commit()
 
 
-# Once a row is actually re-typed Transfer (Medium/High bands), its category/refund status stops
-# mattering for any reporting view (GET /summary excludes type=Transfer outright) — so these two
-# reasons are safe to supersede with transfer_match, and MUST be, or the Needs-Review page (which
-# dispatches purely on needs_review_reason) would never surface the new link for confirmation,
-# while resolving the stale reason (e.g. saving a category correction) would clear needs_review
-# and silently strand the transaction as an unreviewed Transfer (/code-review finding).
-_REASONS_MOOT_ONCE_TRANSFER = frozenset({LOW_CONFIDENCE_CATEGORY, REFUND_AMBIGUITY})
-
-
 def _flag_transfer_match(tx: Transaction, candidate: Transaction, *, type_changed: bool) -> None:
     """
-    Flags both rows needs_review. unrecognised_account is never overwritten — it's about the
-    account's identity, not this transaction's classification, and (per ingestion/
-    account_resolution.py) is only ever raised once per account, so losing it here would mean
-    losing it for good. low_confidence_category/refund_ambiguity are preserved too UNLESS this
-    match actually changed `type` to Transfer (type_changed=True, i.e. High/Medium bands), in
-    which case they're moot and safe to supersede — see _REASONS_MOOT_ONCE_TRANSFER above.
+    Flags both rows needs_review. An already-stored reason is only ever superseded per the shared
+    precedence table in backend/needs_review_reasons.py (should_supersede) — and even then, ONLY
+    when this match actually changed `type` to Transfer (type_changed=True, i.e. the Medium band;
+    High never reaches here — see the known, documented gap in docs/next-steps.md). Once a row is
+    genuinely re-typed Transfer, its category/refund status stops mattering for any reporting view
+    (GET /summary excludes type=Transfer outright), so superseding those two is both safe and
+    necessary: without it, the Needs-Review page (which dispatches purely on needs_review_reason)
+    would never surface the new link for confirmation, while resolving the stale reason (e.g.
+    saving a category correction) would clear needs_review and silently strand the transaction as
+    an unreviewed Transfer (/code-review finding). unrecognised_account outranks transfer_match in
+    that table, so it's never superseded either way — it's about the account's identity, not this
+    transaction's classification, and (per ingestion/account_resolution.py) is only ever raised
+    once per account, so losing it here would mean losing it for good. For a Low-band match
+    (type_changed=False), nothing about the row's classification changed, so an existing reason —
+    including a "lesser" one like low_confidence_category — is left exactly as live as before.
     """
     for member in (tx, candidate):
         member.needs_review = True
         if member.needs_review_reason is None or (
-            type_changed and member.needs_review_reason in _REASONS_MOOT_ONCE_TRANSFER
+            type_changed and should_supersede(member.needs_review_reason, TRANSFER_MATCH)
         ):
             member.needs_review_reason = TRANSFER_MATCH
 
