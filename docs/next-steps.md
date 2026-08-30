@@ -426,6 +426,23 @@ Requirements gathering is well underway. Decided so far (all detailed in
       category-correction save button), so a backend 400/500 would surface as a raw Streamlit
       traceback instead of an inline message — consolidated into one `_perform_action` helper used
       by all six (test added). 169 tests passing after this pass.
+      **Fifth `/code-review` pass (default effort), same day — 4 findings, all fixed:**
+      `unrecognised_account` outranks `transfer_match` in the precedence table (by design — it's
+      never superseded), which meant a row could have a live `TransferGroup` (Tier-2 Medium
+      auto-linked it) while its *displayed* reason stayed `unrecognised_account` — and that
+      reason's branch offered no action at all, so a possibly-wrong auto-link had literally no way
+      to be rejected. Fixed by extracting the linked-transfer confirm/reject controls into
+      `_render_linked_transfer_controls` and rendering them whenever `transfer_group_id` is set,
+      regardless of which reason won the display precedence race (test added). `_confirm_
+      transfer_with_id` didn't exclude a superseded (PENDING-shadow) counterpart the way
+      `transfers/detection.py`'s own Tier-2 candidate search does, so a stale suggestion or a
+      direct PATCH call could link a row rollups already ignore into a live `TransferGroup` — now
+      rejected with 400 (test added). That same handler also hand-rolled the group-creation logic
+      `transfers/detection.py` already has as `_link` — renamed to the public `link_transfer_pair`
+      and reused from both places, so the two can't silently drift apart. Needs-Review's own
+      "Save category" button (the low-confidence-category action) was the one action left not
+      using the `_perform_action` helper the fourth pass introduced specifically to consolidate
+      this pattern — switched over. 171 tests passing after this pass.
    5. **J6 — Portfolio/asset view**. `Asset` entity, `GET /assets` endpoints, Portfolio page.
    6. **J7 — Tax refund (YoY)**. A filter on top of J2's summary endpoint + a chip on Overview.
    7. **J8 — Historical backfill**. Last, unchanged reasoning: needs the live pipeline proven on

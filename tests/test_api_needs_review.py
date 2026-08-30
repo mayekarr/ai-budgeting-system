@@ -264,6 +264,23 @@ def test_confirm_transfer_with_id_rejects_a_same_sign_counterpart(client):
     assert response.status_code == 400
 
 
+def test_confirm_transfer_with_id_rejects_a_superseded_counterpart(client):
+    # /code-review finding: transfers/detection.py's own candidate search excludes a superseded
+    # (PENDING-shadow) row for the same reason — this manual path must match.
+    api_client, SessionLocal, (a, b) = client
+    tx_id = _seed_tx(SessionLocal, a, amount=-100.0, needs_review=True, needs_review_reason=TRANSFER_MATCH)
+    superseded_id = _seed_tx(SessionLocal, b, amount=100.0, superseded_by_id=None)
+    settled_id = _seed_tx(SessionLocal, b, amount=100.0, date=date(2026, 8, 6))
+    with SessionLocal() as session:
+        row = session.get(Transaction, superseded_id)
+        row.superseded_by_id = settled_id
+        session.commit()
+
+    response = api_client.patch(f"/transactions/{tx_id}", json={"confirm_transfer_with_id": superseded_id})
+
+    assert response.status_code == 400
+
+
 # --- PATCH request validation -------------------------------------------------------------------
 
 def test_patch_with_no_action_specified_is_rejected(client):

@@ -104,7 +104,15 @@ def _find_counterpart_via_alias(session: Session, tx: Transaction) -> Optional[T
     return min(candidates, key=lambda c: abs((c.date - tx.date).days))
 
 
-def _link(session: Session, tx: Transaction, counterpart: Transaction, tier: int, confidence: float = 1.0) -> None:
+def link_transfer_pair(
+    session: Session, tx: Transaction, counterpart: Transaction, tier: int, confidence: float = 1.0
+) -> None:
+    """
+    Links two transactions as a Transfer, reusing (or creating) a TransferGroup and setting
+    `type=Transfer` on both. Public — also used directly by backend/api.py's manual
+    confirm_transfer_with_id action (/code-review finding: that handler used to hand-roll this
+    same logic, risking silent drift from this module's own group-reuse behaviour).
+    """
     group = counterpart.transfer_group or tx.transfer_group
     if group is None:
         group = TransferGroup(detection_tier=tier, confidence=confidence)
@@ -255,11 +263,11 @@ def _process_tier2(session: Session, tx: Transaction) -> None:
     candidate, band, other_tied = found
 
     if band == "high":
-        _link(session, tx, candidate, tier=2, confidence=1.0)
+        link_transfer_pair(session, tx, candidate, tier=2, confidence=1.0)
         return
 
     if band == "medium":
-        _link(session, tx, candidate, tier=2, confidence=_TIER2_MEDIUM_CONFIDENCE)
+        link_transfer_pair(session, tx, candidate, tier=2, confidence=_TIER2_MEDIUM_CONFIDENCE)
         _flag_transfer_match(tx, candidate, type_changed=True)
         _flag_unresolved_tie_losers(other_tied)
         session.commit()
@@ -311,7 +319,7 @@ def process_transfer_detection(session: Session, tx: Transaction) -> None:
     if counterpart is None:
         counterpart = _find_counterpart_via_alias(session, tx)
     if counterpart is not None:
-        _link(session, tx, counterpart, tier=1)
+        link_transfer_pair(session, tx, counterpart, tier=1)
         return
 
     _process_tier2(session, tx)

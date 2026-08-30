@@ -63,32 +63,42 @@ def _perform_action(action, success_message: str) -> None:
         st.error(f"Could not complete the action: {exc}")
 
 
+def _render_linked_transfer_controls(tx: dict) -> None:
+    """
+    Confirm/reject controls for a row already linked into a TransferGroup (Tier-2 Medium, a soft
+    non-blocking confirmation). Used both when needs_review_reason is transfer_match itself, and
+    — /code-review finding — for a row whose reason lost the precedence race to something else
+    (e.g. unrecognised_account, which is never superseded per backend/needs_review_reasons.py):
+    without this, such a row would have transfer_group_id set with literally no way to reject a
+    possibly-wrong auto-link, since the "visibility only" branch offers no action at all.
+    """
+    tx_id = tx["id"]
+    # Show the other leg(s), not just the bare group id, so the user isn't confirming blind
+    # (GET /transactions?transfer_group_id=... exists exactly for this).
+    try:
+        group_members = get_transactions(transfer_group_id=tx["transfer_group_id"])
+    except Exception as exc:  # pylint: disable=broad-except
+        group_members = []
+        st.error(f"Could not load the matched transaction: {exc}")
+    other_legs = [m for m in group_members if m["id"] != tx_id]
+    if other_legs:
+        for leg in other_legs:
+            st.caption(f"Matched with: {leg['date']} · {leg['raw_description']} · ${leg['amount']:.2f}")
+    else:
+        st.caption(f"Auto-linked as a Transfer (group {tx['transfer_group_id']}).")
+    col1, col2 = st.columns(2)
+    if col1.button("Confirm transfer", key=f"confirm_linked_{tx_id}"):
+        _perform_action(lambda: confirm_transfer_match(tx_id), f"Transaction {tx_id}: transfer match confirmed.")
+    if col2.button("Not a transfer", key=f"reject_linked_{tx_id}"):
+        _perform_action(
+            lambda: reject_transfer_match(tx_id), f"Transaction {tx_id}: unlinked as not a transfer."
+        )
+
+
 def _render_transfer_match(tx: dict) -> None:
     tx_id = tx["id"]
     if tx.get("transfer_group_id") is not None:
-        # Tier-2 Medium: already auto-linked as Transfer — a soft, non-blocking confirmation.
-        # Show the other leg(s), not just the bare group id, so the user isn't confirming blind
-        # (/code-review finding — GET /transactions?transfer_group_id=... exists exactly for this).
-        try:
-            group_members = get_transactions(transfer_group_id=tx["transfer_group_id"])
-        except Exception as exc:  # pylint: disable=broad-except
-            group_members = []
-            st.error(f"Could not load the matched transaction: {exc}")
-        other_legs = [m for m in group_members if m["id"] != tx_id]
-        if other_legs:
-            for leg in other_legs:
-                st.caption(f"Matched with: {leg['date']} · {leg['raw_description']} · ${leg['amount']:.2f}")
-        else:
-            st.caption(f"Auto-linked as a Transfer (group {tx['transfer_group_id']}).")
-        col1, col2 = st.columns(2)
-        if col1.button("Confirm", key=f"confirm_linked_{tx_id}"):
-            _perform_action(
-                lambda: confirm_transfer_match(tx_id), f"Transaction {tx_id}: transfer match confirmed."
-            )
-        if col2.button("Not a transfer", key=f"reject_linked_{tx_id}"):
-            _perform_action(
-                lambda: reject_transfer_match(tx_id), f"Transaction {tx_id}: unlinked as not a transfer."
-            )
+        _render_linked_transfer_controls(tx)
         return
 
     # Tier-2 Low: suggestion only, not yet linked — recomputed on demand (transfers/detection.py).
@@ -141,12 +151,10 @@ def _render_low_confidence_category(tx: dict) -> None:
     )
 
     if st.button("Save category", key=f"save_category_{tx_id}"):
-        try:
-            correct_transaction_category(tx_id, category=selected_category, subcategory=selected_subcategory)
-            st.session_state["_review_action_success"] = f"Transaction {tx_id} updated to {selected_category}."
-            st.rerun()
-        except Exception as exc:  # pylint: disable=broad-except
-            st.error(f"Could not save correction: {exc}")
+        _perform_action(
+            lambda: correct_transaction_category(tx_id, category=selected_category, subcategory=selected_subcategory),
+            f"Transaction {tx_id} updated to {selected_category}.",
+        )
 
 
 try:
@@ -193,3 +201,9 @@ for tx in filtered:
             # scope (no journey covers account management). A known, honest gap, not silently
             # hidden.
             st.caption("No action available yet for this reason — visibility only.")
+            # /code-review finding: this reason can still win a Tier-2 auto-link (unrecognised_
+            # account outranks transfer_match in the precedence table, so a Medium match never
+            # overwrites it) — without this, that row would have a live TransferGroup with no way
+            # to confirm/reject it at all.
+            if tx.get("transfer_group_id") is not None:
+                _render_linked_transfer_controls(tx)

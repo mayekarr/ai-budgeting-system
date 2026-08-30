@@ -18,11 +18,11 @@ from categorisation.seed_rules import seed_rules_if_empty
 from categorisation.taxonomy import is_valid_category
 from ingestion.account_resolution import resolve_account
 from ingestion.nab_format import NabFormatError, parse_nab_format
-from transfers.detection import find_suggested_transfer_match, process_transfer_detection
+from transfers.detection import find_suggested_transfer_match, link_transfer_pair, process_transfer_detection
 from transfers.refunds import detect_refund
 
 from .database import SessionLocal, bulk_save_transactions, create_tables, engine  # noqa: F401  (engine kept for test monkeypatching)
-from .models import CategorisationRule, Transaction, TransferGroup
+from .models import CategorisationRule, Transaction
 from .needs_review_reasons import (
     LOW_CONFIDENCE_CATEGORY,
     REFUND_AMBIGUITY,
@@ -476,6 +476,15 @@ def _confirm_transfer_with_id(db: Session, tx: Transaction, counterpart_id: int)
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Suggested counterpart is already linked to a transfer group.",
         )
+    # A superseded PENDING row is a shadow of its SETTLED counterpart, already excluded from every
+    # rollup — transfers/detection.py's own candidate search excludes it for the same reason
+    # (/code-review finding: this manual path didn't, so a stale suggestion or a direct PATCH call
+    # could link one into a real TransferGroup).
+    if counterpart.superseded_by_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Counterpart is a superseded transaction and cannot be linked.",
+        )
     # A transfer's two legs are always on different accounts with opposite-sign amounts — without
     # this check, a bad/misused counterpart id (e.g. a same-account, same-sign transaction) would
     # still pass every prior check and produce a nonsensical single-real-member "TransferGroup".
@@ -485,12 +494,10 @@ def _confirm_transfer_with_id(db: Session, tx: Transaction, counterpart_id: int)
             detail="Counterpart must be an opposite-sign transaction on a different account.",
         )
 
-    group = TransferGroup(detection_tier=2, confidence=1.0)
-    db.add(group)
-    db.flush()
+    # Reuses transfers/detection.py's own linking primitive rather than hand-rolling the same
+    # group-creation/type-assignment steps a second time here (/code-review finding).
+    link_transfer_pair(db, tx, counterpart, tier=2, confidence=1.0)
     for member in (tx, counterpart):
-        member.transfer_group = group
-        member.type = "Transfer"
         # This IS the change from non-Transfer to Transfer (a Low match is never auto-linked) —
         # a preserved low_confidence_category/refund_ambiguity becomes moot right now.
         _clear_transfer_review_flag(member, type_changed=True)

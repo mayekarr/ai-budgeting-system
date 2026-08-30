@@ -215,3 +215,18 @@ def test_unrecognised_account_shows_visibility_only_message():
 
     assert not at.exception
     assert any("visibility only" in c.value.lower() for c in at.caption)
+
+
+def test_unrecognised_account_row_also_linked_as_transfer_gets_confirm_reject_controls():
+    # /code-review finding: unrecognised_account outranks transfer_match in the precedence table
+    # (backend/needs_review_reasons.py), so a Medium-band auto-link on such a row never becomes
+    # the displayed reason — without this, there would be no way to reject a possibly-wrong link.
+    items = [_tx(1, "unrecognised_account", transfer_group_id=7)]
+    with patch("frontend.api_client.get_transactions", return_value=items):
+        at = _open_needs_review()
+        at.run()
+
+    assert not at.exception
+    assert any("visibility only" in c.value.lower() for c in at.caption)
+    assert at.button(key="confirm_linked_1") is not None
+    assert at.button(key="reject_linked_1") is not None
