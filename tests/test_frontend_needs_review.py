@@ -34,6 +34,21 @@ def test_empty_queue_shows_info_message():
     assert any("nothing needs review" in i.value.lower() for i in at.info)
 
 
+def test_superseded_rows_are_excluded_from_the_queue():
+    # /code-review finding: a superseded PENDING row is already excluded from every reporting
+    # view — it must not still show up here as an actionable item.
+    items = [
+        _tx(1, "low_confidence_category", superseded_by_id=99),
+        _tx(2, "refund_ambiguity"),
+    ]
+    with patch("frontend.api_client.get_transactions", return_value=items):
+        at = _open_needs_review()
+        at.run()
+
+    assert not at.exception
+    assert any("1 item" in c.value for c in at.caption)
+
+
 def test_reason_filter_narrows_the_shown_items():
     items = [
         _tx(1, "low_confidence_category"),
@@ -59,6 +74,21 @@ def test_refund_ambiguity_yes_button_calls_is_refund_true():
 
     assert not at.exception
     mock_call.assert_called_once_with(1, True)
+
+
+def test_refund_ambiguity_action_failure_shows_an_error_instead_of_raising():
+    # /code-review finding: every action button here was missing the try/except
+    # Category Drill-in's save button already demonstrated is expected in this file.
+    items = [_tx(1, "refund_ambiguity")]
+    with patch("frontend.api_client.get_transactions", return_value=items):
+        at = _open_needs_review()
+        at.run()
+
+        with patch("frontend.api_client.correct_transaction_is_refund", side_effect=RuntimeError("boom")):
+            at.button(key="refund_yes_1").click().run()
+
+    assert not at.exception
+    assert any("boom" in e.value for e in at.error)
 
 
 def test_refund_ambiguity_no_button_calls_is_refund_false():

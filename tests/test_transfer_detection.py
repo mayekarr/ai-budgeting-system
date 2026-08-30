@@ -499,3 +499,10 @@ def test_tier2_genuine_high_band_tie_is_downgraded_to_medium_not_silently_auto_l
     assert tx_a.type == "Transfer"
     assert tx_a.needs_review is True
     assert tx_a.needs_review_reason == TRANSFER_MATCH
+
+    # /code-review finding: the tied-but-not-chosen candidate must not vanish with zero signal —
+    # it stays unlinked, but is still flagged for review.
+    loser = tx_c if linked_to_b else tx_b
+    assert loser.transfer_group_id is None
+    assert loser.needs_review is True
+    assert loser.needs_review_reason == TRANSFER_MATCH

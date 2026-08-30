@@ -407,6 +407,25 @@ Requirements gathering is well underway. Decided so far (all detailed in
       consequence of `needs_review_reason` being one field, not a new bug — the precedence-table
       consolidation just makes that tradeoff more clearly intentional than before. 165 tests
       passing after this pass.
+      **Fourth `/code-review` pass (default effort), same day — 5 findings, all fixed:**
+      `_apply_category_correction` and the `is_refund` PATCH branch both still unconditionally
+      cleared `needs_review`/`needs_review_reason` — the same "wipes a sibling's unrelated reason"
+      bug class the third pass fixed for the transfer confirm/reject actions, just not applied to
+      these two older (J4-era) paths, most exposed via Category Drill-in since (unlike
+      Needs-Review) it isn't reason-gated and will happily show a correction control for a row
+      whose real, live reason is `unrecognised_account`; fixed via a new `_resolve_review_flag`
+      helper that only clears when the stored reason is the one the action actually addresses (2
+      tests added). A genuine multi-way Tier-2 tie (e.g. one anchor transaction matching two
+      same-amount/same-day candidates on different accounts) linked/flagged the winner but left
+      the losing candidate completely unflagged once excluded from future candidate pools —
+      `_best_tier2_candidate` now also returns the other tied candidates so `_process_tier2` can
+      flag them too, unlinked (test extended). The Needs-Review page didn't exclude superseded
+      (pending-shadow) rows the way Category Drill-in already does, so a row no rollup will ever
+      count could still appear as an actionable item — fixed with the same client-side filter
+      (test added). Five of the six action buttons had no error handling (unlike the
+      category-correction save button), so a backend 400/500 would surface as a raw Streamlit
+      traceback instead of an inline message — consolidated into one `_perform_action` helper used
+      by all six (test added). 169 tests passing after this pass.
    5. **J6 — Portfolio/asset view**. `Asset` entity, `GET /assets` endpoints, Portfolio page.
    6. **J7 — Tax refund (YoY)**. A filter on top of J2's summary endpoint + a chip on Overview.
    7. **J8 — Historical backfill**. Last, unchanged reasoning: needs the live pipeline proven on

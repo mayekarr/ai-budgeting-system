@@ -346,8 +346,7 @@ def correct_transaction(
         _apply_category_correction(db, tx, correction.category, correction.subcategory)
     if correction.is_refund is not None:
         tx.is_refund = correction.is_refund
-        tx.needs_review = False
-        tx.needs_review_reason = None
+        _resolve_review_flag(tx, REFUND_AMBIGUITY)
     if correction.confirm_transfer_match:
         _confirm_transfer_match(tx)
     if correction.confirm_transfer_with_id is not None:
@@ -359,6 +358,19 @@ def correct_transaction(
     db.refresh(tx)
     logger.info("Updated transaction %d.", transaction_id)
     return tx
+
+
+def _resolve_review_flag(tx: Transaction, addressed_reason: str) -> None:
+    """
+    Clears needs_review only when the transaction's actual stored reason is the one this action
+    addresses (or already None) — an unrelated, still-live reason (e.g. unrecognised_account on a
+    row a user happens to correct the category of via Category Drill-in, which isn't reason-gated
+    the way Needs-Review is) must survive (/code-review finding — the same bug class the transfer
+    confirm/reject actions were fixed for, missed here since this path predates that fix).
+    """
+    if tx.needs_review_reason in (addressed_reason, None):
+        tx.needs_review = False
+        tx.needs_review_reason = None
 
 
 def _apply_category_correction(db: Session, tx: Transaction, category: str, subcategory: Optional[str]) -> None:
@@ -376,8 +388,7 @@ def _apply_category_correction(db: Session, tx: Transaction, category: str, subc
 
     tx.category = category
     tx.subcategory = subcategory
-    tx.needs_review = False
-    tx.needs_review_reason = None
+    _resolve_review_flag(tx, LOW_CONFIDENCE_CATEGORY)
     tx.confidence_score = 1.0
 
     # Case-insensitive, trimmed comparison — matches categorisation/rules.py's own exact-match

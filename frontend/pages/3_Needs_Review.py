@@ -50,6 +50,19 @@ def _row_header(tx: dict) -> None:
     st.caption(_reason_label(tx.get("needs_review_reason")))
 
 
+def _perform_action(action, success_message: str) -> None:
+    """Runs a review-queue action button's API call, on success rerunning so the queue reflects
+    it immediately (same pattern as Category Drill-in's correction control), on failure showing
+    the error inline instead of letting an uncaught HTTP error surface as a raw traceback
+    (/code-review finding — every other action button here was missing this)."""
+    try:
+        action()
+        st.session_state["_review_action_success"] = success_message
+        st.rerun()
+    except Exception as exc:  # pylint: disable=broad-except
+        st.error(f"Could not complete the action: {exc}")
+
+
 def _render_transfer_match(tx: dict) -> None:
     tx_id = tx["id"]
     if tx.get("transfer_group_id") is not None:
@@ -69,13 +82,13 @@ def _render_transfer_match(tx: dict) -> None:
             st.caption(f"Auto-linked as a Transfer (group {tx['transfer_group_id']}).")
         col1, col2 = st.columns(2)
         if col1.button("Confirm", key=f"confirm_linked_{tx_id}"):
-            confirm_transfer_match(tx_id)
-            st.session_state["_review_action_success"] = f"Transaction {tx_id}: transfer match confirmed."
-            st.rerun()
+            _perform_action(
+                lambda: confirm_transfer_match(tx_id), f"Transaction {tx_id}: transfer match confirmed."
+            )
         if col2.button("Not a transfer", key=f"reject_linked_{tx_id}"):
-            reject_transfer_match(tx_id)
-            st.session_state["_review_action_success"] = f"Transaction {tx_id}: unlinked as not a transfer."
-            st.rerun()
+            _perform_action(
+                lambda: reject_transfer_match(tx_id), f"Transaction {tx_id}: unlinked as not a transfer."
+            )
         return
 
     # Tier-2 Low: suggestion only, not yet linked — recomputed on demand (transfers/detection.py).
@@ -88,9 +101,7 @@ def _render_transfer_match(tx: dict) -> None:
     if suggestion is None:
         st.caption("No current candidate match.")
         if st.button("Dismiss", key=f"dismiss_{tx_id}"):
-            reject_transfer_match(tx_id)
-            st.session_state["_review_action_success"] = f"Transaction {tx_id}: dismissed."
-            st.rerun()
+            _perform_action(lambda: reject_transfer_match(tx_id), f"Transaction {tx_id}: dismissed.")
         return
 
     st.caption(
@@ -98,26 +109,25 @@ def _render_transfer_match(tx: dict) -> None:
     )
     col1, col2 = st.columns(2)
     if col1.button("Confirm match", key=f"confirm_suggested_{tx_id}"):
-        confirm_transfer_with_id(tx_id, suggestion["id"])
-        st.session_state["_review_action_success"] = f"Transaction {tx_id}: linked as a Transfer."
-        st.rerun()
+        _perform_action(
+            lambda: confirm_transfer_with_id(tx_id, suggestion["id"]),
+            f"Transaction {tx_id}: linked as a Transfer.",
+        )
     if col2.button("Not a transfer", key=f"reject_suggested_{tx_id}"):
-        reject_transfer_match(tx_id)
-        st.session_state["_review_action_success"] = f"Transaction {tx_id}: dismissed."
-        st.rerun()
+        _perform_action(lambda: reject_transfer_match(tx_id), f"Transaction {tx_id}: dismissed.")
 
 
 def _render_refund_ambiguity(tx: dict) -> None:
     tx_id = tx["id"]
     col1, col2 = st.columns(2)
     if col1.button("It's a refund", key=f"refund_yes_{tx_id}"):
-        correct_transaction_is_refund(tx_id, True)
-        st.session_state["_review_action_success"] = f"Transaction {tx_id}: marked as a refund."
-        st.rerun()
+        _perform_action(
+            lambda: correct_transaction_is_refund(tx_id, True), f"Transaction {tx_id}: marked as a refund."
+        )
     if col2.button("Not a refund", key=f"refund_no_{tx_id}"):
-        correct_transaction_is_refund(tx_id, False)
-        st.session_state["_review_action_success"] = f"Transaction {tx_id}: marked as not a refund."
-        st.rerun()
+        _perform_action(
+            lambda: correct_transaction_is_refund(tx_id, False), f"Transaction {tx_id}: marked as not a refund."
+        )
 
 
 def _render_low_confidence_category(tx: dict) -> None:
@@ -140,10 +150,16 @@ def _render_low_confidence_category(tx: dict) -> None:
 
 
 try:
-    items = get_transactions(needs_review=True)
+    fetched = get_transactions(needs_review=True)
 except Exception as exc:  # pylint: disable=broad-except
     st.error(f"Could not load the review queue: {exc}")
     st.stop()
+
+# A superseded PENDING row (backend/database.py's pending<->settled reconciliation) is already
+# excluded from every reporting view — GET /transactions doesn't filter this itself (matching
+# Category Drill-in's own client-side exclusion), so without it a "ghost" row that no rollup will
+# ever count could still show up as an actionable item here (/code-review finding).
+items = [t for t in fetched if t.get("superseded_by_id") is None]
 
 if not items:
     st.info("Nothing needs review right now.")

@@ -210,7 +210,12 @@ def _tier2_score(tx: Transaction, pair: tuple[Transaction, str]) -> tuple[int, i
     return (_BAND_RANK[band], -abs((candidate.date - tx.date).days), -abs(abs(candidate.amount) - abs(tx.amount)))
 
 
-def _best_tier2_candidate(session: Session, tx: Transaction) -> Optional[tuple[Transaction, str]]:
+def _best_tier2_candidate(
+    session: Session, tx: Transaction
+) -> Optional[tuple[Transaction, str, list[Transaction]]]:
+    """Returns (best candidate, band, other candidates that tied for best) — the tied-but-not-
+    chosen list lets the caller flag them too rather than letting a genuine multi-way ambiguity
+    silently vanish once the winner consumes the only pairing (/code-review finding)."""
     candidates = _find_tier2_candidates(session, tx)
     if not candidates:
         return None
@@ -219,6 +224,7 @@ def _best_tier2_candidate(session: Session, tx: Transaction) -> Optional[tuple[T
     best_score = max(score for _, score in scored)
     tied = [pair for pair, score in scored if score == best_score]
     candidate, band = tied[0]
+    other_tied = [c for c, _ in tied[1:]]
 
     # A genuine tie (e.g. two same-amount, same-day candidates on different accounts) must not be
     # silently auto-linked to whichever the DB happens to return first — High confidence claims
@@ -226,17 +232,27 @@ def _best_tier2_candidate(session: Session, tx: Transaction) -> Optional[tuple[T
     # confirmation, rather than picking an arbitrary winner with zero review flag.
     if len(tied) > 1 and band == "high":
         band = "medium"
-    return candidate, band
+    return candidate, band, other_tied
 
 
 _TIER2_MEDIUM_CONFIDENCE = 0.6
+
+
+def _flag_unresolved_tie_losers(others: list[Transaction]) -> None:
+    """A candidate that tied for the best match but lost the pairing to another candidate must not
+    vanish with zero signal once the winner is linked/flagged — flag it too (unlinked) so a
+    genuine multi-way ambiguity stays visible in the review queue (/code-review finding)."""
+    for other in others:
+        other.needs_review = True
+        if other.needs_review_reason is None or should_supersede(other.needs_review_reason, TRANSFER_MATCH):
+            other.needs_review_reason = TRANSFER_MATCH
 
 
 def _process_tier2(session: Session, tx: Transaction) -> None:
     found = _best_tier2_candidate(session, tx)
     if found is None:
         return
-    candidate, band = found
+    candidate, band, other_tied = found
 
     if band == "high":
         _link(session, tx, candidate, tier=2, confidence=1.0)
@@ -245,12 +261,14 @@ def _process_tier2(session: Session, tx: Transaction) -> None:
     if band == "medium":
         _link(session, tx, candidate, tier=2, confidence=_TIER2_MEDIUM_CONFIDENCE)
         _flag_transfer_match(tx, candidate, type_changed=True)
+        _flag_unresolved_tie_losers(other_tied)
         session.commit()
         return
 
     # Low confidence: not auto-tagged — surfaced in the review queue (J5) for the user to
     # confirm/reject rather than guessed at (docs/design-logic-and-ux.md §2.3).
     _flag_transfer_match(tx, candidate, type_changed=False)
+    _flag_unresolved_tie_losers(other_tied)
     session.commit()
 
 

@@ -130,6 +130,19 @@ def test_patch_is_refund_false_also_resolves_the_flag(client):
     assert body["needs_review"] is False
 
 
+def test_patch_is_refund_preserves_an_unrelated_needs_review_reason(client):
+    # /code-review finding: same bug class as the category-correction path — an is_refund
+    # correction must not silently wipe an unrelated, still-live reason.
+    api_client, SessionLocal, (a, _) = client
+    tx_id = _seed_tx(SessionLocal, a, needs_review=True, needs_review_reason=UNRECOGNISED_ACCOUNT)
+
+    body = api_client.patch(f"/transactions/{tx_id}", json={"is_refund": True}).json()
+
+    assert body["is_refund"] is True
+    assert body["needs_review"] is True
+    assert body["needs_review_reason"] == UNRECOGNISED_ACCOUNT
+
+
 # --- confirm_transfer_match (Tier-2 Medium: already linked) ------------------------------------
 
 def test_confirm_transfer_match_clears_review_flag_on_both_legs(client):
