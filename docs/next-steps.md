@@ -285,6 +285,22 @@ Requirements gathering is well underway. Decided so far (all detailed in
 
    Forecasting and cloud deployment are Phase 2.
 
+## Local test environment note (2026-08-30)
+
+`main` was fast-forward-merged locally to `origin/main` (PR #1, J4) — full suite: 116 passed, 2
+failed on first run, both pre-existing frontend `AppTest` tests unrelated to J4's diff
+(`test_frontend_overview.py::test_overview_renders_kpis_from_summary`,
+`test_frontend_category_drill_in.py::test_drill_in_fetches_the_date_range_unfiltered_by_category`),
+both hitting Streamlit's internal 15s script-run timeout rather than a real assertion failure. On
+rerun, the overview one passed (flaky) and the drill-in one failed again with the same timeout. The
+full suite also took ~4.5 minutes locally — slow for ~120 tests. Suspected but not confirmed cause:
+this repo lives under a OneDrive-synced folder, and OneDrive's on-access file scanning/sync can slow
+local file I/O enough to blow Streamlit's fixed internal timeouts under load. Not something to fix
+via test code — if it recurs, the fix (if the OneDrive theory holds) is running/cloning the repo
+outside a synced folder, not adjusting test logic. CI runs on a GitHub-hosted runner (no OneDrive),
+so this has never shown up there. Not blocking; noted so a slow/flaky local frontend test run isn't
+mistaken for a real regression next time.
+
 ## CI/CD (added 2026-08-23, off `main` — not part of a numbered journey)
 
 - **TODO, no deadline: register a self-hosted runner and confirm CD actually works.** CI is live and
