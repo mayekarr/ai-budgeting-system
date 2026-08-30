@@ -274,8 +274,75 @@ Requirements gathering is well underway. Decided so far (all detailed in
       since there's no unique constraint on `(pattern, match_type, source)`. Not worth the added
       complexity for a single local user driving one correction at a time through the dashboard
       (NFR-1); revisit if this ever gets a second concurrent caller. 118 tests passing.
-   4. **J5 — Needs-review queue**. Forces Tier-2 heuristic matching + `TransferGroup` to mature
-      (this is where the 3-account chain logic gets fully exercised end-to-end), Needs-Review page.
+   4. ~~**J5 — Needs-review queue**~~ — **Built** 2026-08-30, on branch
+      `feature/j5-needs-review-queue`. Tier-2 heuristic transfer matching added to
+      `transfers/detection.py` (`process_transfer_detection` falls back to it whenever Tier-1
+      finds nothing): three confidence bands per `docs/design-logic-and-ux.md` §2.3 — High (exact
+      amount, same day) auto-links with no review; Medium (exact amount in the ±2-business-day
+      window, or near-equal amount same day) auto-links as `Transfer` but flags
+      `needs_review=True` as a soft, non-blocking confirmation; Low (near-equal amount, in-window
+      only) is deliberately **not** auto-tagged — flagged for review with the candidate
+      recomputed on demand (`find_suggested_transfer_match`) rather than persisted, since it was
+      never confirmed.
+      **Schema addition beyond the design doc**: a new `Transaction.needs_review_reason` column
+      (`backend/models.py`, values in the new `backend/needs_review_reasons.py`) — the design doc
+      calls for the queue to be "filterable by reason" but the pre-J5 schema had no way to tell a
+      low-confidence category flag apart from an unresolved-account flag or a refund-ambiguity
+      flag after the fact (all three only ever showed up as the same bare `needs_review=True`
+      with no other distinguishing marker). Reason precedence when more than one applies at
+      upload time: `unrecognised_account` > `refund_ambiguity` > `low_confidence_category`
+      (`backend/api.py`'s upload handler). A later Tier-2 medium/low transfer match
+      (`_flag_transfer_match` in `transfers/detection.py`) only sets `needs_review_reason` if the
+      row doesn't already have one — first reason set wins, never overwritten — after a
+      `/code-review` pass caught the original always-overwrite version silently dropping an
+      `unrecognised_account`/`refund_ambiguity` flag with no way to revisit it (see the review
+      note below). `finance.db` was deleted and recreated fresh for this (no
+      migration tooling exists in this project, and the only local copy held 4 leftover
+      manual-test rows, not real backfilled data — J8 hasn't run yet).
+      **`PATCH /transactions/{id}` extended** (`category`/`subcategory` now optional, not
+      required, so a request can target just one concern): `is_refund` resolves refund-ambiguity
+      rows; `confirm_transfer_match` resolves an already-linked Medium match (cascades
+      `needs_review=False` to every leg of the group); `confirm_transfer_with_id` links a
+      not-yet-linked Low suggestion at full (user-confirmed) confidence; `reject_transfer_match`
+      unlinks an auto-tagged group (reverting `type` to what the amount sign implies, deleting the
+      now-orphaned `TransferGroup`) or, for an unlinked Low suggestion, just dismisses the flag.
+      New `GET /transactions/{id}/suggested-transfer-match` backs the Low-confidence case's UI.
+      `GET /transactions` gained `needs_review_reason` and `transfer_group_id` filters.
+      `frontend/pages/3_Needs_Review.py` (new): one combined queue per
+      `docs/design-logic-and-ux.md` §3.2, reason-filterable, with a per-reason action — category
+      correction (reusing Drill-in's pattern), refund confirm/not-a-refund, and transfer
+      confirm/reject (with the suggested counterpart shown for the Low case). `unrecognised_account`
+      rows (and future J8 `backfill_flagged` rows) are shown for visibility only — resolving an
+      unrecognised account needs account rename/merge tooling no journey has built yet; a known,
+      deliberately out-of-scope gap, not silently hidden.
+      **Deliberate deviation from the design doc's literal "3 members" chain language**: the real
+      RC→MAC→MACACC chain (§4.1) now fully links — MAC(out)↔MACACC complete via Tier-2 High
+      (same-day/exact-amount coincidence) exactly as planned — but as **two separate 2-member
+      `TransferGroup`s** (RC↔MAC(in) via Tier-1, MAC(out)↔MACACC via Tier-2), not one 3-4-member
+      group. The matching algorithm's graph has transactions as nodes and pairwise matches as
+      edges; MAC's inbound and outbound legs are different transaction rows with no edge between
+      them (no same-account "pass-through" rule was specified), so they don't collapse into one
+      connected component. Every leg is still correctly `type=Transfer` and excluded from
+      Income/Expense totals either way — this is a graph-modeling gap in the design doc, not a
+      functional one, and is called out in `tests/test_transfer_detection.py`'s
+      `test_mac_out_macacc_leg_links_via_tier2_after_tier1_leaves_it_unlinked`.
+      **Known, deliberately deferred gap**: a transaction already `needs_review` for a
+      category/refund reason that later gets auto-linked as a high-confidence Transfer (Tier-1 or
+      Tier-2 High) keeps that stale flag — `_link` in `transfers/detection.py` doesn't touch
+      `needs_review`/`needs_review_reason` on the confidence-band-driven path, matching Tier-1's
+      pre-existing behaviour rather than adding reason-aware clearing logic under time pressure.
+      Real but low-priority (the row still surfaces in the queue, just under a reason that no
+      longer fully applies); revisit if it causes confusion in practice.
+      `/code-review medium` run against the full diff, same day — 2 findings, both fixed:
+      `_find_tier2_candidates` didn't exclude a candidate already linked into some other
+      `TransferGroup`, so an unrelated already-resolved transfer leg could be pulled into a new,
+      unrelated group via pure amount/date coincidence — now excludes `transfer_group_id IS NOT
+      NULL` rows from the candidate pool (test added:
+      `test_tier2_does_not_pull_an_already_linked_transaction_into_a_new_group`); the same pass
+      also caught the `needs_review_reason` overwrite bug described just above before it shipped
+      (this doc's wording already reflects the fixed, non-overwriting behaviour — test added:
+      `test_tier2_does_not_overwrite_an_existing_unrelated_needs_review_reason`). 152 tests
+      passing after fixes.
    5. **J6 — Portfolio/asset view**. `Asset` entity, `GET /assets` endpoints, Portfolio page.
    6. **J7 — Tax refund (YoY)**. A filter on top of J2's summary endpoint + a chip on Overview.
    7. **J8 — Historical backfill**. Last, unchanged reasoning: needs the live pipeline proven on

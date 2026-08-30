@@ -18,11 +18,17 @@ from categorisation.seed_rules import seed_rules_if_empty
 from categorisation.taxonomy import is_valid_category
 from ingestion.account_resolution import resolve_account
 from ingestion.nab_format import NabFormatError, parse_nab_format
-from transfers.detection import process_transfer_detection
+from transfers.detection import find_suggested_transfer_match, process_transfer_detection
 from transfers.refunds import detect_refund
 
 from .database import SessionLocal, bulk_save_transactions, create_tables, engine  # noqa: F401  (engine kept for test monkeypatching)
-from .models import CategorisationRule, Transaction
+from .models import CategorisationRule, Transaction, TransferGroup
+from .needs_review_reasons import (
+    LOW_CONFIDENCE_CATEGORY,
+    REFUND_AMBIGUITY,
+    TRANSFER_MATCH,
+    UNRECOGNISED_ACCOUNT,
+)
 
 # Below any real seeded/llm_promoted rule priority (categorisation/seed_rules.py starts at 1;
 # claude_fallback.py promotes at 500) — an explicit user correction (FR-9) must win a same-text
@@ -70,12 +76,26 @@ class TransactionOut(BaseModel):
     superseded_by_id: int | None
     source: str
     needs_review: bool
+    needs_review_reason: str | None
     confidence_score: float | None
 
 
 class TransactionCorrection(BaseModel):
-    category: str
+    # Category correction (J4) — category, if given, must come with a valid subcategory pairing.
+    category: str | None = None
     subcategory: str | None = None
+    # Refund-ambiguity resolution (J5, §1.2): user confirms/corrects an is_refund flag.
+    is_refund: bool | None = None
+    # Transfer-match resolution (J5, §2.3/§3.2):
+    #   - confirm_transfer_match: the transaction is already linked (Tier-2 Medium's soft
+    #     confirmation) — just clear the review flag on every leg of its group.
+    #   - confirm_transfer_with_id: the transaction is NOT yet linked (Tier-2 Low's suggested-only
+    #     match) — link it now with the given counterpart, confidently, then clear the flag.
+    #   - reject_transfer_match: "not a transfer" — unlink if linked (reverting `type` to what the
+    #     amount sign implies) and always clear the review flag.
+    confirm_transfer_match: bool = False
+    confirm_transfer_with_id: int | None = None
+    reject_transfer_match: bool = False
 
 
 class UploadResult(BaseModel):
@@ -162,6 +182,18 @@ async def upload_transactions(
             tx_type = "Income"
             cat_needs_review = False
 
+        # Priority when more than one signal is ambiguous at once: an unrecognised account is the
+        # most foundational concern (it affects what the row even *means*), then refund ambiguity,
+        # then a merely-low-confidence category — matching backend/needs_review_reasons.py.
+        if resolved.needs_review:
+            needs_review_reason = UNRECOGNISED_ACCOUNT
+        elif refund_decision.needs_review:
+            needs_review_reason = REFUND_AMBIGUITY
+        elif cat_needs_review:
+            needs_review_reason = LOW_CONFIDENCE_CATEGORY
+        else:
+            needs_review_reason = None
+
         to_persist.append(
             {
                 "account_id": resolved.account.id,
@@ -174,7 +206,8 @@ async def upload_transactions(
                 "type": tx_type,
                 "is_refund": refund_decision.is_refund,
                 "source": "bank_import",
-                "needs_review": cat_needs_review or refund_decision.needs_review or resolved.needs_review,
+                "needs_review": needs_review_reason is not None,
+                "needs_review_reason": needs_review_reason,
                 "confidence_score": confidence,
                 "raw_transaction_type": row.raw_transaction_type,
                 "balance": row.balance,
@@ -224,8 +257,15 @@ def list_transactions(
     category: Optional[str] = Query(default=None),
     type: Optional[str] = Query(default=None),
     needs_review: Optional[bool] = Query(default=None),
+    needs_review_reason: Optional[str] = Query(default=None),
+    transfer_group_id: Optional[int] = Query(default=None),
 ) -> List[TransactionOut]:
-    """Filterable transaction list (FR-13/FR-14; needs_review backs FR-10's review queue)."""
+    """
+    Filterable transaction list (FR-13/FR-14; needs_review backs FR-10's review queue).
+    needs_review_reason and transfer_group_id back J5's Needs-Review page — the latter is what
+    lets the Transfers part of that queue fetch every leg of a suggested/confirmed group in one
+    call (docs/design-logic-and-ux.md §2.4).
+    """
     q = db.query(Transaction)
     if date_from is not None:
         q = q.filter(Transaction.date >= date_from)
@@ -239,10 +279,33 @@ def list_transactions(
         q = q.filter(Transaction.type == type)
     if needs_review is not None:
         q = q.filter(Transaction.needs_review.is_(needs_review))
+    if needs_review_reason is not None:
+        q = q.filter(Transaction.needs_review_reason == needs_review_reason)
+    if transfer_group_id is not None:
+        q = q.filter(Transaction.transfer_group_id == transfer_group_id)
 
     records = q.order_by(Transaction.date.desc(), Transaction.id.desc()).all()
     logger.info("Fetched %d transactions.", len(records))
     return records
+
+
+@app.get("/transactions/{transaction_id}/suggested-transfer-match", response_model=Optional[TransactionOut])
+def get_suggested_transfer_match(
+    transaction_id: int,
+    db: Session = Depends(get_session),
+) -> Optional[Transaction]:
+    """
+    The current best Tier-2 Low-confidence candidate for a not-yet-linked
+    needs_review_reason=transfer_match row (docs/design-logic-and-ux.md §2.3) — recomputed on
+    request rather than persisted, since a Low match is deliberately never auto-tagged. Backs J5's
+    Needs-Review page. Returns null (not 404) when there's currently no candidate, since "no
+    suggestion right now" isn't an error — a `confidence_score` of 1.0 on the caller's own read is
+    NOT implied here; this is a suggestion, not a scored field on the transaction itself.
+    """
+    tx = db.get(Transaction, transaction_id)
+    if tx is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found.")
+    return find_suggested_transfer_match(db, tx)
 
 
 @app.patch("/transactions/{transaction_id}", response_model=TransactionOut)
@@ -252,23 +315,50 @@ def correct_transaction(
     db: Session = Depends(get_session),
 ) -> Transaction:
     """
-    Manual category correction (J4, FR-9/FR-15). Writes/updates a `source=user_correction`
-    CategorisationRule keyed on the transaction's exact raw_description, so a future transaction
-    with the same text auto-categorises the same way instead of repeating the same mistake — the
-    same learning mechanism claude_fallback.py uses for a confident LLM result.
+    Manual category correction (J4, FR-9/FR-15), plus J5's review-queue resolution actions
+    (is_refund correction, transfer-match confirm/reject). Each action below is independent —
+    a request may include one or several at once.
     """
     tx = db.get(Transaction, transaction_id)
     if tx is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found.")
-    if not is_valid_category(correction.category, correction.subcategory):
+
+    if correction.category is not None:
+        _apply_category_correction(db, tx, correction.category, correction.subcategory)
+    if correction.is_refund is not None:
+        tx.is_refund = correction.is_refund
+        tx.needs_review = False
+        tx.needs_review_reason = None
+    if correction.confirm_transfer_match:
+        _confirm_transfer_match(tx)
+    if correction.confirm_transfer_with_id is not None:
+        _confirm_transfer_with_id(db, tx, correction.confirm_transfer_with_id)
+    if correction.reject_transfer_match:
+        _reject_transfer_match(db, tx)
+
+    db.commit()
+    db.refresh(tx)
+    logger.info("Updated transaction %d.", transaction_id)
+    return tx
+
+
+def _apply_category_correction(db: Session, tx: Transaction, category: str, subcategory: Optional[str]) -> None:
+    """
+    Writes/updates a `source=user_correction` CategorisationRule keyed on the transaction's exact
+    raw_description, so a future transaction with the same text auto-categorises the same way
+    instead of repeating the same mistake — the same learning mechanism claude_fallback.py uses
+    for a confident LLM result.
+    """
+    if not is_valid_category(category, subcategory):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid category/subcategory: {correction.category}/{correction.subcategory}",
+            detail=f"Invalid category/subcategory: {category}/{subcategory}",
         )
 
-    tx.category = correction.category
-    tx.subcategory = correction.subcategory
+    tx.category = category
+    tx.subcategory = subcategory
     tx.needs_review = False
+    tx.needs_review_reason = None
     tx.confidence_score = 1.0
 
     # Case-insensitive, trimmed comparison — matches categorisation/rules.py's own exact-match
@@ -297,14 +387,69 @@ def correct_transaction(
             is_active=True,
         )
         db.add(rule)
-    rule.category = correction.category
-    rule.subcategory = correction.subcategory
-
-    db.commit()
-    db.refresh(tx)
+    rule.category = category
+    rule.subcategory = subcategory
     logger.info("Corrected transaction %d to %s/%s; user_correction rule updated.",
-                transaction_id, correction.category, correction.subcategory)
-    return tx
+                tx.id, category, subcategory)
+
+
+def _confirm_transfer_match(tx: Transaction) -> None:
+    """Tier-2 Medium: already linked (auto-tagged) — just clear the soft-confirmation flag on
+    every leg of the group together (docs/design-logic-and-ux.md §3.2)."""
+    if tx.transfer_group_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Transaction has no transfer match to confirm.",
+        )
+    for member in tx.transfer_group.members:
+        member.needs_review = False
+        member.needs_review_reason = None
+
+
+def _confirm_transfer_with_id(db: Session, tx: Transaction, counterpart_id: int) -> None:
+    """Tier-2 Low: not yet linked (suggestion only) — link now with the given counterpart at full
+    (user-confirmed) confidence, then clear the review flag on both legs."""
+    if tx.transfer_group_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Transaction is already linked to a transfer group.",
+        )
+    counterpart = db.get(Transaction, counterpart_id)
+    if counterpart is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Suggested counterpart not found.")
+    if counterpart.transfer_group_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Suggested counterpart is already linked to a transfer group.",
+        )
+
+    group = TransferGroup(detection_tier=2, confidence=1.0)
+    db.add(group)
+    db.flush()
+    for member in (tx, counterpart):
+        member.transfer_group = group
+        member.type = "Transfer"
+        member.needs_review = False
+        member.needs_review_reason = None
+
+
+def _reject_transfer_match(db: Session, tx: Transaction) -> None:
+    """
+    "Not a transfer": if already auto-linked (Tier-2 High/Medium), unlink every leg of the group
+    and revert `type` to what the amount sign implies, deleting the now-empty group; if only
+    suggested (Tier-2 Low, never linked), just dismiss the flag on this row.
+    """
+    if tx.transfer_group_id is not None:
+        group = tx.transfer_group
+        for member in list(group.members):
+            member.transfer_group_id = None
+            member.type = "Income" if member.amount > 0 else "Expense"
+            member.needs_review = False
+            member.needs_review_reason = None
+        db.delete(group)
+    else:
+        tx.needs_review = False
+        tx.needs_review_reason = None
 
 
 @app.get("/summary", response_model=SummaryOut)

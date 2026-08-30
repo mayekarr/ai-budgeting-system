@@ -113,6 +113,12 @@ class Transaction(Base):
 
     source: Mapped[str] = mapped_column(String(20), nullable=False, default="bank_import")
     needs_review: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    # Added for J5's Needs-Review queue: without a stored reason, a queue row's underlying cause
+    # (low-confidence category vs. an unresolved new account vs. an ambiguous refund vs. a
+    # low/medium-confidence transfer match) can't be told apart after the fact from the other
+    # fields alone, and docs/design-logic-and-ux.md §3.2 explicitly requires filtering by reason.
+    # One of the values in backend/needs_review_reasons.py. Null when needs_review is False.
+    needs_review_reason: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     confidence_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     raw_transaction_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

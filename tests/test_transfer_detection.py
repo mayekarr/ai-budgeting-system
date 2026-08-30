@@ -6,7 +6,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from backend.models import Account, AccountAlias, Base, Transaction
+from backend.models import Account, AccountAlias, Base, Transaction, TransferGroup
+from backend.needs_review_reasons import TRANSFER_MATCH, UNRECOGNISED_ACCOUNT
 from transfers.detection import process_transfer_detection
 
 
@@ -23,6 +24,15 @@ def _account_with_alias(session, name, raw_identifier):
     session.add(account)
     session.flush()
     session.add(AccountAlias(account_id=account.id, raw_identifier=raw_identifier))
+    session.commit()
+    return account
+
+
+def _account(session, name):
+    # Tier-2 (§2.3) never matches on alias text, only amount/date/sign across accounts already in
+    # the Account table — no AccountAlias needed for these tests, unlike the Tier-1 ones above.
+    account = Account(name=name, institution="NAB", owner="Rohan", account_type="Everyday")
+    session.add(account)
     session.commit()
     return account
 
@@ -95,9 +105,9 @@ def test_three_account_chain_rc_to_mac_leg_links_via_tier1_text_signal(session):
     # RC->MAC leg carries a clean Tier-1 text signal ("Macquarie CM Acc" naming the counterpart
     # account in RC's own description). The MAC->MACACC leg has no shared reference number and no
     # alias text identifying the other side in what the real export actually contains — only
-    # same-day/same-amount coincidence, which is Tier-2's heuristic job (deferred to increment 4 /
-    # J5), not something Tier-1 signal matching can honestly claim. This test asserts what Tier-1
-    # actually delivers on this real example, not an idealized full chain.
+    # same-day/same-amount coincidence, which is Tier-2's heuristic job (J5,
+    # test_mac_out_macacc_leg_links_via_tier2_after_tier1_leaves_it_unlinked below), not something
+    # Tier-1 signal matching can honestly claim. This test covers only the Tier-1 leg in isolation.
     rc = _account_with_alias(session, "RC", "133500607")
     mac = _account_with_alias(session, "MAC", "Macquarie CM Acc")
     macacc = _account_with_alias(session, "MACACC", "Macquarie Cash Management Accelerator Account")
@@ -116,11 +126,6 @@ def test_three_account_chain_rc_to_mac_leg_links_via_tier1_text_signal(session):
     assert tx_rc.transfer_group_id is not None
     assert tx_rc.transfer_group_id == tx_mac_in.transfer_group_id
     assert tx_rc.type == "Transfer"
-
-    # MAC(out) <-> MACACC has no Tier-1 signal in the real data available here; correctly stays
-    # unlinked for now rather than being guessed at without a genuine signal (FR-10's spirit).
-    assert tx_mac_out.transfer_group_id is None
-    assert tx_macacc.transfer_group_id is None
 
 
 def test_dependent_payment_is_never_a_transfer_candidate(session):
@@ -213,3 +218,209 @@ def test_closest_date_match_is_preferred_when_two_same_amount_transfers_exist(se
     assert rc_mon.transfer_group_id == jc_mon.transfer_group_id
     assert rc_wed.transfer_group_id == jc_wed.transfer_group_id
     assert rc_mon.transfer_group_id != rc_wed.transfer_group_id
+
+
+# --- Tier 2: heuristic pairing (§2.3, J5) -----------------------------------------------------
+# No AccountAlias/reference-number signal in any of these — that's the whole point of Tier 2:
+# amount/date/sign coincidence only, across two of the user's own (already-registered) accounts.
+
+def test_tier2_exact_amount_same_day_auto_links_high_confidence_no_review(session):
+    a = _account(session, "A")
+    b = _account(session, "B")
+    tx_a = _tx(session, a, date(2026, 8, 5), -100.00, "Unlabelled transfer out")
+    tx_b = _tx(session, b, date(2026, 8, 5), 100.00, "Unlabelled transfer in")
+
+    process_transfer_detection(session, tx_a)
+    process_transfer_detection(session, tx_b)
+
+    session.refresh(tx_a)
+    session.refresh(tx_b)
+    assert tx_a.type == "Transfer"
+    assert tx_a.transfer_group_id == tx_b.transfer_group_id
+    # High confidence — no review needed, matching §2.3's table.
+    assert tx_a.needs_review is False
+    assert tx_b.needs_review is False
+
+
+def test_tier2_exact_amount_within_window_auto_links_medium_confidence_flagged(session):
+    a = _account(session, "A")
+    b = _account(session, "B")
+    # 2 business days apart (Wed -> Fri), not same day.
+    tx_a = _tx(session, a, date(2026, 8, 5), -100.00, "Unlabelled transfer out")
+    tx_b = _tx(session, b, date(2026, 8, 7), 100.00, "Unlabelled transfer in")
+
+    process_transfer_detection(session, tx_a)
+    process_transfer_detection(session, tx_b)
+
+    session.refresh(tx_a)
+    session.refresh(tx_b)
+    assert tx_a.type == "Transfer"
+    assert tx_a.transfer_group_id == tx_b.transfer_group_id
+    # Medium confidence: auto-tagged, but surfaced as a soft (non-blocking) confirmation.
+    assert tx_a.needs_review is True
+    assert tx_a.needs_review_reason == TRANSFER_MATCH
+    assert tx_b.needs_review is True
+
+
+def test_tier2_near_equal_amount_same_day_auto_links_medium_confidence_flagged(session):
+    a = _account(session, "A")
+    b = _account(session, "B")
+    tx_a = _tx(session, a, date(2026, 8, 5), -100.00, "Unlabelled transfer out")
+    tx_b = _tx(session, b, date(2026, 8, 5), 101.50, "Unlabelled transfer in")  # within $2 tolerance
+
+    process_transfer_detection(session, tx_a)
+    process_transfer_detection(session, tx_b)
+
+    session.refresh(tx_a)
+    session.refresh(tx_b)
+    assert tx_a.type == "Transfer"
+    assert tx_a.transfer_group_id == tx_b.transfer_group_id
+    assert tx_a.needs_review is True
+    assert tx_a.needs_review_reason == TRANSFER_MATCH
+
+
+def test_tier2_near_equal_amount_within_window_only_flags_without_auto_tagging(session):
+    a = _account(session, "A")
+    b = _account(session, "B")
+    tx_a = _tx(session, a, date(2026, 8, 5), -100.00, "Unlabelled transfer out")
+    tx_b = _tx(session, b, date(2026, 8, 7), 101.50, "Unlabelled transfer in")  # near-equal AND in-window only
+    tx_a.type, tx_b.type = "Expense", "Income"  # what categorisation would already have assigned
+    session.commit()
+
+    process_transfer_detection(session, tx_a)
+    process_transfer_detection(session, tx_b)
+
+    session.refresh(tx_a)
+    session.refresh(tx_b)
+    # Low confidence: not auto-tagged — stays whatever it already was, just flagged for review.
+    assert tx_a.type == "Expense"
+    assert tx_a.transfer_group_id is None
+    assert tx_a.needs_review is True
+    assert tx_a.needs_review_reason == TRANSFER_MATCH
+    assert tx_b.type == "Income"
+    assert tx_b.needs_review is True
+
+
+def test_tier2_outside_date_window_does_not_match(session):
+    a = _account(session, "A")
+    b = _account(session, "B")
+    tx_a = _tx(session, a, date(2026, 8, 5), -100.00, "Unlabelled transfer out")
+    tx_b = _tx(session, b, date(2026, 8, 11), 100.00, "Unlabelled transfer in")  # 4 business days later
+
+    process_transfer_detection(session, tx_a)
+    process_transfer_detection(session, tx_b)
+
+    session.refresh(tx_a)
+    session.refresh(tx_b)
+    assert tx_a.transfer_group_id is None
+    assert tx_a.needs_review is False
+    assert tx_b.transfer_group_id is None
+
+
+def test_tier2_same_account_is_never_a_candidate(session):
+    a = _account(session, "A")
+    tx1 = _tx(session, a, date(2026, 8, 5), -100.00, "Debit")
+    tx2 = _tx(session, a, date(2026, 8, 5), 100.00, "Credit")
+
+    process_transfer_detection(session, tx1)
+    process_transfer_detection(session, tx2)
+
+    session.refresh(tx1)
+    session.refresh(tx2)
+    assert tx1.transfer_group_id is None
+    assert tx2.transfer_group_id is None
+
+
+def test_mac_out_macacc_leg_links_via_tier2_after_tier1_leaves_it_unlinked(session):
+    # Same real §4.1 scenario as test_three_account_chain_rc_to_mac_leg_links_via_tier1_text_signal
+    # above, extended to show Tier-2 (J5) completes the leg Tier-1 honestly couldn't: MAC(out) and
+    # MACACC match on nothing but same-day/exact-amount coincidence, which is exactly Tier-2 High
+    # confidence (§2.3). This ends up as its own 2-member TransferGroup, separate from the
+    # RC<->MAC(in) Tier-1 group — see docs/next-steps.md for why this project treats that as the
+    # correct, honest outcome rather than forcing all 4 legs into one group.
+    rc = _account_with_alias(session, "RC", "133500607")
+    mac = _account_with_alias(session, "MAC", "Macquarie CM Acc")
+    macacc = _account_with_alias(session, "MACACC", "Macquarie Cash Management Accelerator Account")
+
+    tx_rc = _tx(session, rc, date(2026, 7, 27), -1816.50,
+                "ANILA ROHAN MAYEKAR R7974261326 Macquarie CM Acc", "TRANSFER DEBIT")
+    tx_mac_in = _tx(session, mac, date(2026, 7, 27), 1816.50, "Mr Rohan Ashok Mayekar Macquarie Cm Acc")
+    tx_mac_out = _tx(session, mac, date(2026, 7, 27), -1816.50,
+                      "To Rohan Mayekar & Anila Rohan Mayekar - Internal transfer")
+    tx_macacc = _tx(session, macacc, date(2026, 7, 27), 1816.50, "From Rohan Mayekar & Anila Rohan Mayekar")
+
+    for tx in (tx_rc, tx_mac_in, tx_mac_out, tx_macacc):
+        process_transfer_detection(session, tx)
+
+    session.refresh(tx_rc)
+    session.refresh(tx_mac_in)
+    session.refresh(tx_mac_out)
+    session.refresh(tx_macacc)
+
+    assert tx_rc.transfer_group_id == tx_mac_in.transfer_group_id
+    assert tx_mac_out.transfer_group_id == tx_macacc.transfer_group_id
+    assert tx_mac_out.transfer_group_id is not None
+    assert tx_mac_out.type == "Transfer"
+    assert tx_macacc.type == "Transfer"
+    # The two links are genuinely separate groups (no same-account pass-through edge between
+    # MAC's in/out legs is inferred) — both still correctly excluded from Income/Expense totals.
+    assert tx_rc.transfer_group_id != tx_mac_out.transfer_group_id
+
+
+def test_tier2_does_not_pull_an_already_linked_transaction_into_a_new_group(session):
+    # /code-review finding: an unrelated, already-resolved transfer leg must not be absorbed into
+    # a new group just because a third transaction coincidentally shares its amount/date.
+    a = _account(session, "A")
+    b = _account(session, "B")
+    c = _account(session, "C")
+
+    group = TransferGroup(detection_tier=1, confidence=1.0)
+    session.add(group)
+    session.flush()
+    tx_a = _tx(session, a, date(2026, 8, 5), -500.00, "Real transfer out")
+    tx_b = _tx(session, b, date(2026, 8, 5), 500.00, "Real transfer in")
+    tx_a.transfer_group_id = group.id
+    tx_b.transfer_group_id = group.id
+    tx_a.type = tx_b.type = "Transfer"
+    session.commit()
+
+    # Coincidentally same amount/day as tx_b, but on an unrelated third account with no
+    # counterpart of its own.
+    tx_c = _tx(session, c, date(2026, 8, 5), -500.00, "Unrelated coincidental payment")
+    process_transfer_detection(session, tx_c)
+
+    session.refresh(tx_c)
+    session.refresh(tx_a)
+    session.refresh(tx_b)
+    assert tx_c.transfer_group_id is None
+    # The original pair is untouched.
+    assert tx_a.transfer_group_id == group.id
+    assert tx_b.transfer_group_id == group.id
+
+
+def test_tier2_does_not_overwrite_an_existing_unrelated_needs_review_reason(session):
+    # /code-review finding: a row already flagged for an unrecognised account (a concern about the
+    # account itself, unrelated to categorisation) must not have that flag silently replaced by a
+    # coincidental transfer_match — that would drop the real, still-unresolved concern from the
+    # queue with no way to revisit it.
+    a = _account(session, "A")
+    b = _account(session, "B")
+    tx_a = _tx(session, a, date(2026, 8, 5), -100.00, "Unlabelled transfer out")
+    tx_a.needs_review = True
+    tx_a.needs_review_reason = UNRECOGNISED_ACCOUNT
+    # Near-equal (not exact) amount, same day -> Medium band, which is where needs_review_reason
+    # gets (re)assigned.
+    tx_b = _tx(session, b, date(2026, 8, 5), 101.50, "Unlabelled transfer in")
+    session.commit()
+
+    process_transfer_detection(session, tx_a)
+    process_transfer_detection(session, tx_b)
+
+    session.refresh(tx_a)
+    session.refresh(tx_b)
+    # Medium band still links both (auto-tagged with a soft confirmation), but the pre-existing,
+    # unrelated reason on tx_a is preserved rather than clobbered.
+    assert tx_a.type == "Transfer"
+    assert tx_a.needs_review_reason == UNRECOGNISED_ACCOUNT
+    # tx_b had no prior reason, so it does get tagged transfer_match.
+    assert tx_b.needs_review_reason == TRANSFER_MATCH
