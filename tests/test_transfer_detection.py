@@ -7,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from backend.models import Account, AccountAlias, Base, Transaction, TransferGroup
-from backend.needs_review_reasons import TRANSFER_MATCH, UNRECOGNISED_ACCOUNT
+from backend.needs_review_reasons import LOW_CONFIDENCE_CATEGORY, TRANSFER_MATCH, UNRECOGNISED_ACCOUNT
 from transfers.detection import process_transfer_detection
 
 
@@ -399,6 +399,10 @@ def test_tier2_does_not_pull_an_already_linked_transaction_into_a_new_group(sess
 
 
 def test_tier2_does_not_overwrite_an_existing_unrelated_needs_review_reason(session):
+    # /code-review: unrecognised_account is only ever raised once per account (ingestion/
+    # account_resolution.py), so it must never be superseded, regardless of band — unlike
+    # low_confidence_category/refund_ambiguity, which ARE superseded on a type-changing band (see
+    # test_tier2_medium_band_supersedes_a_moot_low_confidence_category_reason below).
     # /code-review finding: a row already flagged for an unrecognised account (a concern about the
     # account itself, unrelated to categorisation) must not have that flag silently replaced by a
     # coincidental transfer_match — that would drop the real, still-unresolved concern from the
@@ -424,3 +428,48 @@ def test_tier2_does_not_overwrite_an_existing_unrelated_needs_review_reason(sess
     assert tx_a.needs_review_reason == UNRECOGNISED_ACCOUNT
     # tx_b had no prior reason, so it does get tagged transfer_match.
     assert tx_b.needs_review_reason == TRANSFER_MATCH
+
+
+def test_tier2_medium_band_supersedes_a_moot_low_confidence_category_reason(session):
+    # /code-review finding: a Medium-band match changes `type` to Transfer, which makes category
+    # (and low_confidence_category's whole reason for existing) moot — GET /summary excludes
+    # Transfer rows outright. If the stale reason were preserved instead, the Needs-Review page
+    # (which dispatches purely on needs_review_reason) would only ever offer the category-fix
+    # control, and saving that correction would clear needs_review — permanently stranding the row
+    # as an unreviewed Transfer with no path back to confirm/reject the new link.
+    a = _account(session, "A")
+    b = _account(session, "B")
+    tx_a = _tx(session, a, date(2026, 8, 5), -100.00, "Unlabelled transfer out")
+    tx_a.needs_review = True
+    tx_a.needs_review_reason = LOW_CONFIDENCE_CATEGORY
+    tx_b = _tx(session, b, date(2026, 8, 5), 101.50, "Unlabelled transfer in")  # near-equal, same day -> Medium
+    session.commit()
+
+    process_transfer_detection(session, tx_a)
+    process_transfer_detection(session, tx_b)
+
+    session.refresh(tx_a)
+    assert tx_a.type == "Transfer"
+    assert tx_a.needs_review_reason == TRANSFER_MATCH
+
+
+def test_tier2_low_band_preserves_a_still_live_low_confidence_category_reason(session):
+    # Contrast with the Medium case above: a Low-band match does NOT change `type` (it's only a
+    # suggestion), so the category is still exactly as live/uncertain as before — the reason must
+    # stay put, not be superseded.
+    a = _account(session, "A")
+    b = _account(session, "B")
+    tx_a = _tx(session, a, date(2026, 8, 5), -100.00, "Unlabelled transfer out")
+    tx_a.type = "Expense"
+    tx_a.needs_review = True
+    tx_a.needs_review_reason = LOW_CONFIDENCE_CATEGORY
+    # near-equal amount, within window but not same day -> Low band
+    tx_b = _tx(session, b, date(2026, 8, 7), 101.50, "Unlabelled transfer in")
+    session.commit()
+
+    process_transfer_detection(session, tx_a)
+    process_transfer_detection(session, tx_b)
+
+    session.refresh(tx_a)
+    assert tx_a.type == "Expense"  # not auto-tagged
+    assert tx_a.needs_review_reason == LOW_CONFIDENCE_CATEGORY

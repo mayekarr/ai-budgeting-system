@@ -81,6 +81,8 @@ class TransactionOut(BaseModel):
 
 
 class TransactionCorrection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     # Category correction (J4) — category, if given, must come with a valid subcategory pairing.
     category: str | None = None
     subcategory: str | None = None
@@ -323,6 +325,19 @@ def correct_transaction(
     if tx is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found.")
 
+    no_action_requested = (
+        correction.category is None
+        and correction.is_refund is None
+        and not correction.confirm_transfer_match
+        and correction.confirm_transfer_with_id is None
+        and not correction.reject_transfer_match
+    )
+    if no_action_requested:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No correction action specified.",
+        )
+
     if correction.category is not None:
         _apply_category_correction(db, tx, correction.category, correction.subcategory)
     if correction.is_refund is not None:
@@ -414,6 +429,11 @@ def _confirm_transfer_with_id(db: Session, tx: Transaction, counterpart_id: int)
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Transaction is already linked to a transfer group.",
         )
+    if counterpart_id == tx.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A transaction cannot be its own transfer counterpart.",
+        )
     counterpart = db.get(Transaction, counterpart_id)
     if counterpart is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Suggested counterpart not found.")
@@ -421,6 +441,14 @@ def _confirm_transfer_with_id(db: Session, tx: Transaction, counterpart_id: int)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Suggested counterpart is already linked to a transfer group.",
+        )
+    # A transfer's two legs are always on different accounts with opposite-sign amounts — without
+    # this check, a bad/misused counterpart id (e.g. a same-account, same-sign transaction) would
+    # still pass every prior check and produce a nonsensical single-real-member "TransferGroup".
+    if counterpart.account_id == tx.account_id or (counterpart.amount < 0) == (tx.amount < 0):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Counterpart must be an opposite-sign transaction on a different account.",
         )
 
     group = TransferGroup(detection_tier=2, confidence=1.0)

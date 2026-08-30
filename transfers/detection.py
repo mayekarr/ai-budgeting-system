@@ -29,7 +29,7 @@ from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from backend.models import Account, AccountAlias, Transaction, TransferGroup
-from backend.needs_review_reasons import TRANSFER_MATCH
+from backend.needs_review_reasons import LOW_CONFIDENCE_CATEGORY, REFUND_AMBIGUITY, TRANSFER_MATCH
 from transfers.aliases import alias_matches_text
 
 _REFERENCE_TOKEN_RE = re.compile(r"\b[A-Za-z]{1,3}\d{6,}\b")
@@ -230,28 +230,39 @@ def _process_tier2(session: Session, tx: Transaction) -> None:
 
     if band == "medium":
         _link(session, tx, candidate, tier=2, confidence=_TIER2_MEDIUM_CONFIDENCE)
-        _flag_transfer_match(tx, candidate)
+        _flag_transfer_match(tx, candidate, type_changed=True)
         session.commit()
         return
 
     # Low confidence: not auto-tagged — surfaced in the review queue (J5) for the user to
     # confirm/reject rather than guessed at (docs/design-logic-and-ux.md §2.3).
-    _flag_transfer_match(tx, candidate)
+    _flag_transfer_match(tx, candidate, type_changed=False)
     session.commit()
 
 
-def _flag_transfer_match(tx: Transaction, candidate: Transaction) -> None:
+# Once a row is actually re-typed Transfer (Medium/High bands), its category/refund status stops
+# mattering for any reporting view (GET /summary excludes type=Transfer outright) — so these two
+# reasons are safe to supersede with transfer_match, and MUST be, or the Needs-Review page (which
+# dispatches purely on needs_review_reason) would never surface the new link for confirmation,
+# while resolving the stale reason (e.g. saving a category correction) would clear needs_review
+# and silently strand the transaction as an unreviewed Transfer (/code-review finding).
+_REASONS_MOOT_ONCE_TRANSFER = frozenset({LOW_CONFIDENCE_CATEGORY, REFUND_AMBIGUITY})
+
+
+def _flag_transfer_match(tx: Transaction, candidate: Transaction, *, type_changed: bool) -> None:
     """
-    Flags both rows needs_review, but never overwrites an existing needs_review_reason: a row
-    already flagged unrecognised_account (about the account itself, not this categorisation) or
-    refund_ambiguity/low_confidence_category (still live for a Low-band match, since `type` isn't
-    changed for those) must not have that concern silently replaced and lost — first reason set
-    wins. A High/Medium-band row still gets needs_review_reason=transfer_match if it had no prior
-    flag, so the queue can show the (non-blocking) transfer confirmation.
+    Flags both rows needs_review. unrecognised_account is never overwritten — it's about the
+    account's identity, not this transaction's classification, and (per ingestion/
+    account_resolution.py) is only ever raised once per account, so losing it here would mean
+    losing it for good. low_confidence_category/refund_ambiguity are preserved too UNLESS this
+    match actually changed `type` to Transfer (type_changed=True, i.e. High/Medium bands), in
+    which case they're moot and safe to supersede — see _REASONS_MOOT_ONCE_TRANSFER above.
     """
     for member in (tx, candidate):
         member.needs_review = True
-        if member.needs_review_reason is None:
+        if member.needs_review_reason is None or (
+            type_changed and member.needs_review_reason in _REASONS_MOOT_ONCE_TRANSFER
+        ):
             member.needs_review_reason = TRANSFER_MATCH
 
 

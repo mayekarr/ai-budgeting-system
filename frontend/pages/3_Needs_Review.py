@@ -8,7 +8,6 @@ from backend.needs_review_reasons import (
     TRANSFER_MATCH,
     UNRECOGNISED_ACCOUNT,
 )
-from categorisation.taxonomy import CATEGORIES, TAXONOMY
 from frontend.api_client import (
     confirm_transfer_match,
     confirm_transfer_with_id,
@@ -18,6 +17,7 @@ from frontend.api_client import (
     get_transactions,
     reject_transfer_match,
 )
+from frontend.category_correction import render_category_correction_widget
 
 st.set_page_config(page_title="Needs Review", layout="wide")
 st.title("Needs Review")
@@ -110,31 +110,16 @@ def _render_refund_ambiguity(tx: dict) -> None:
 
 def _render_low_confidence_category(tx: dict) -> None:
     tx_id = tx["id"]
-    category_key = f"needs_review_category_{tx_id}"
-    subcategory_key = f"needs_review_subcategory_{tx_id}"
-    last_seen_key = f"_needs_review_last_seen_category_{tx_id}"
-
-    current_category = tx.get("category") if tx.get("category") in CATEGORIES else CATEGORIES[0]
-    if category_key not in st.session_state:
-        st.session_state[category_key] = current_category
-
-    selected_category = st.selectbox("Category", CATEGORIES, key=category_key)
-
-    # A category change can leave the subcategory widget's persisted value outside the new
-    # option list — same reset pattern as Category Drill-in's correction control.
-    if st.session_state.get(last_seen_key) != selected_category:
-        st.session_state[subcategory_key] = ""
-        st.session_state[last_seen_key] = selected_category
-
-    selected_subcategory = st.selectbox(
-        "Subcategory", [""] + TAXONOMY[selected_category], key=subcategory_key
+    selected_category, selected_subcategory = render_category_correction_widget(
+        category_key=f"needs_review_category_{tx_id}",
+        subcategory_key=f"needs_review_subcategory_{tx_id}",
+        last_seen_key=f"_needs_review_last_seen_category_{tx_id}",
+        default_category=tx.get("category"),
     )
 
     if st.button("Save category", key=f"save_category_{tx_id}"):
         try:
-            correct_transaction_category(
-                tx_id, category=selected_category, subcategory=selected_subcategory or None
-            )
+            correct_transaction_category(tx_id, category=selected_category, subcategory=selected_subcategory)
             st.session_state["_review_action_success"] = f"Transaction {tx_id} updated to {selected_category}."
             st.rerun()
         except Exception as exc:  # pylint: disable=broad-except

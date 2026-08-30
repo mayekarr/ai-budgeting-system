@@ -195,6 +195,61 @@ def test_confirm_transfer_with_id_already_linked_transaction_is_rejected(client)
     assert response.status_code == 400
 
 
+def test_confirm_transfer_with_id_rejects_itself_as_counterpart(client):
+    # /code-review finding: a transaction confirming itself as its own transfer counterpart would
+    # otherwise pass every other check and produce a group with only one real member.
+    api_client, SessionLocal, (a, _) = client
+    tx_id = _seed_tx(SessionLocal, a, needs_review=True, needs_review_reason=TRANSFER_MATCH)
+
+    response = api_client.patch(f"/transactions/{tx_id}", json={"confirm_transfer_with_id": tx_id})
+
+    assert response.status_code == 400
+
+
+def test_confirm_transfer_with_id_rejects_a_same_account_counterpart(client):
+    api_client, SessionLocal, (a, _) = client
+    tx_id = _seed_tx(SessionLocal, a, amount=-100.0, needs_review=True, needs_review_reason=TRANSFER_MATCH)
+    same_account_other_id = _seed_tx(SessionLocal, a, amount=100.0)
+
+    response = api_client.patch(
+        f"/transactions/{tx_id}", json={"confirm_transfer_with_id": same_account_other_id}
+    )
+
+    assert response.status_code == 400
+
+
+def test_confirm_transfer_with_id_rejects_a_same_sign_counterpart(client):
+    api_client, SessionLocal, (a, b) = client
+    tx_id = _seed_tx(SessionLocal, a, amount=-100.0, needs_review=True, needs_review_reason=TRANSFER_MATCH)
+    same_sign_other_id = _seed_tx(SessionLocal, b, amount=-100.0)  # also a debit, not opposite
+
+    response = api_client.patch(f"/transactions/{tx_id}", json={"confirm_transfer_with_id": same_sign_other_id})
+
+    assert response.status_code == 400
+
+
+# --- PATCH request validation -------------------------------------------------------------------
+
+def test_patch_with_no_action_specified_is_rejected(client):
+    api_client, SessionLocal, (a, _) = client
+    tx_id = _seed_tx(SessionLocal, a)
+
+    response = api_client.patch(f"/transactions/{tx_id}", json={})
+
+    assert response.status_code == 400
+
+
+def test_patch_with_unknown_field_is_rejected(client):
+    # extra="forbid" — a typo'd/unrecognised field must fail loudly, not be silently dropped and
+    # return 200 with nothing actually changed.
+    api_client, SessionLocal, (a, _) = client
+    tx_id = _seed_tx(SessionLocal, a)
+
+    response = api_client.patch(f"/transactions/{tx_id}", json={"catgory": "Groceries"})
+
+    assert response.status_code == 422
+
+
 # --- reject_transfer_match -----------------------------------------------------------------
 
 def test_reject_transfer_match_unlinks_an_auto_tagged_pair_and_reverts_type(client):

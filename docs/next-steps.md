@@ -343,6 +343,33 @@ Requirements gathering is well underway. Decided so far (all detailed in
       (this doc's wording already reflects the fixed, non-overwriting behaviour — test added:
       `test_tier2_does_not_overwrite_an_existing_unrelated_needs_review_reason`). 152 tests
       passing after fixes.
+      **Second `/code-review` pass (default effort), same day — 5 findings, all addressed:**
+      `_confirm_transfer_with_id` didn't validate the given counterpart was a real, distinct
+      opposite-sign transaction on a different account — a same-id/same-account/same-sign
+      counterpart id would pass every existing check and produce a corrupted single-real-member
+      `TransferGroup`; now rejected with 400 (3 tests added). The `needs_review_reason`
+      preservation fix from the first pass was itself too broad: it preserved
+      `low_confidence_category`/`refund_ambiguity` even for a Medium-band match that actually
+      changes `type` to `Transfer` — since category is moot on a Transfer row (`GET /summary`
+      excludes them outright) but the Needs-Review page dispatches purely on
+      `needs_review_reason`, the stale reason meant the page never offered the transfer
+      confirmation, and resolving the stale reason (e.g. a category fix) would clear
+      `needs_review` and permanently strand the row as an unreviewed Transfer link — fixed by only
+      preserving those two reasons when the match *didn't* change `type` (Low band);
+      `unrecognised_account` is still never overwritten regardless of band, since it's about the
+      account, not this transaction, and (per `ingestion/account_resolution.py`) is only ever
+      raised once per account (2 tests added, one per band). `TransactionCorrection` had no
+      `extra="forbid"` and no "at least one action" check, so a misspelled field or an empty `{}`
+      body silently succeeded and changed nothing — fixed (2 tests added). The duplicated
+      category/subcategory correction widget (Drill-in and Needs-Review each hand-rolled the same
+      reset-on-category-change logic) was extracted into
+      `frontend/category_correction.py::render_category_correction_widget`, used by both pages —
+      pure reuse, no behaviour change (existing tests cover it). Finally, the deliberate
+      RC→MAC→MACACC "two separate 2-member groups, not one chain" deviation from
+      `docs/product-requirements.md`'s own §4.1 wording was previously only recorded in this file;
+      CLAUDE.md requires updating the requirements doc too when a decision changes it, so
+      §4.1 now carries the same explanation inline (a `~~struck~~` + **Built** note, matching this
+      project's established doc-update pattern). 159 tests passing after this pass.
    5. **J6 — Portfolio/asset view**. `Asset` entity, `GET /assets` endpoints, Portfolio page.
    6. **J7 — Tax refund (YoY)**. A filter on top of J2's summary endpoint + a chip on Overview.
    7. **J8 — Historical backfill**. Last, unchanged reasoning: needs the live pipeline proven on
