@@ -3,9 +3,9 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from categorisation.taxonomy import CATEGORIES, TAXONOMY
 from frontend.api_client import correct_transaction_category, get_transactions
 from frontend.categories import ALL_CATEGORIES, category_options, present_categories
+from frontend.category_correction import render_category_correction_widget
 
 st.set_page_config(page_title="Category Drill-in", layout="wide")
 st.title("Category Drill-in")
@@ -89,20 +89,12 @@ else:
         format_func=_tx_label, key="drill_in_correction_tx_select",
     )
 
-    selected_correction_category = st.selectbox(
-        "New category", CATEGORIES, key="drill_in_correction_category_select"
-    )
-
-    # A category change can leave the subcategory widget's persisted key value outside the new
-    # category's option list (e.g. switching to a category with fewer/no subcategories) — reset it
-    # explicitly, same pattern as the category-filter selectbox above.
-    if st.session_state.get("_drill_in_correction_last_seen_category") != selected_correction_category:
-        st.session_state["drill_in_correction_subcategory_select"] = ""
-        st.session_state["_drill_in_correction_last_seen_category"] = selected_correction_category
-
-    selected_correction_subcategory = st.selectbox(
-        "New subcategory", [""] + TAXONOMY[selected_correction_category],
-        key="drill_in_correction_subcategory_select",
+    selected_correction_category, selected_correction_subcategory = render_category_correction_widget(
+        category_key="drill_in_correction_category_select",
+        subcategory_key="drill_in_correction_subcategory_select",
+        last_seen_key="_drill_in_correction_last_seen_category",
+        category_label="New category",
+        subcategory_label="New subcategory",
     )
 
     if st.button("Save correction", key="drill_in_save_correction_button"):
@@ -110,7 +102,7 @@ else:
             correct_transaction_category(
                 selected_tx_id,
                 category=selected_correction_category,
-                subcategory=selected_correction_subcategory or None,
+                subcategory=selected_correction_subcategory,
             )
             st.session_state["_drill_in_correction_success"] = (
                 f"Transaction {selected_tx_id} updated to {selected_correction_category}."

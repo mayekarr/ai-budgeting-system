@@ -79,6 +79,24 @@ def test_patch_clears_needs_review_and_sets_full_confidence(client):
     assert body["confidence_score"] == 1.0
 
 
+def test_patch_category_correction_preserves_an_unrelated_needs_review_reason(client):
+    # /code-review finding: Category Drill-in isn't reason-gated (unlike Needs-Review), so a user
+    # can correct the category of a row whose real, still-unresolved concern is something else
+    # entirely (e.g. an unrecognised account) — that concern must survive the correction.
+    from backend.needs_review_reasons import UNRECOGNISED_ACCOUNT
+
+    api_client, SessionLocal, account_id = client
+    tx_id = _seed(
+        SessionLocal, account_id, needs_review=True, needs_review_reason=UNRECOGNISED_ACCOUNT
+    )
+
+    body = api_client.patch(f"/transactions/{tx_id}", json={"category": "Groceries"}).json()
+
+    assert body["category"] == "Groceries"  # the correction itself still applies
+    assert body["needs_review"] is True
+    assert body["needs_review_reason"] == UNRECOGNISED_ACCOUNT
+
+
 def test_patch_without_subcategory_clears_it(client):
     api_client, SessionLocal, account_id = client
     tx_id = _seed(SessionLocal, account_id, category="Groceries", subcategory=None)

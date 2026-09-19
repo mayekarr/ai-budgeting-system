@@ -10,3 +10,4 @@ st.markdown(
     "in the sidebar to explore your spending."
 )
 st.page_link("pages/1_Overview.py", label="Go to Overview →")
+st.page_link("pages/3_Needs_Review.py", label="Go to Needs Review →")

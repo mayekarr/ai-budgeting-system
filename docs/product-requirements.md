@@ -121,8 +121,18 @@ sample files, validating the FR-9c/9e design with concrete evidence rather than 
 - NBA `-$5,000 "Transfer To ROHAN MAYEKAR ... transfer salary"` (2026-08-05) ↔ RC `+$5,000
   "ROHAN MAYEKARtransfer salary"`, same date — the equivalent pattern from Rohan's side; NBA itself
   receives Rohan's payroll (`"Salary STAFF DEPARTMENT 00497982"`) before forwarding the tranche.
-- RC → MAC → MACACC: a same-day, same-amount ($1,816.50, 2026-07-27) three-account chain — transfer
-  detection (FR-9e) needs to handle chains of more than two legs, not just pairs.
+- RC → MAC → MACACC: a same-day, same-amount ($1,816.50, 2026-07-27) three-account chain — ~~transfer
+  detection (FR-9e) needs to handle chains of more than two legs, not just pairs~~ — **Built, with a
+  scoped deviation, 2026-08-30 (J5)**: RC↔MAC and MAC↔MACACC both link correctly (`type=Transfer`,
+  excluded from Income/Expense totals either way), but as **two separate 2-member `TransferGroup`s**
+  rather than one 3-4-member chain. The matching algorithm models transactions as graph nodes and
+  pairwise matches as edges (`docs/design-logic-and-ux.md` §2.4); MAC's inbound and outbound legs are
+  different transaction rows with no edge between them (no same-account "pass-through" rule was ever
+  specified), so they don't collapse into one connected component. Functionally complete (every leg
+  correctly excluded from totals, every leg individually queryable); the specific "one combined
+  chain" framing above isn't literally met. Revisit only if the UI ever needs to render "this is one
+  3-leg chain" as a single unit — not needed for any of the 10 journeys as designed. Full detail:
+  `docs/next-steps.md` step 6.4 (J5), `tests/test_transfer_detection.py::test_mac_out_macacc_leg_links_via_tier2_after_tier1_leaves_it_unlinked`.
 
 **Design-relevant nuance surfaced by the data:** both AC and NBA send recurring money to
 `"ARVAN MAYEKAR"` (guitar lessons, food, a birthday trip) — Arvan is a dependent, not an account

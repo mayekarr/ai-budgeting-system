@@ -60,6 +60,7 @@ def test_transaction_defaults(session):
     assert tx.type == "Expense"
     assert tx.is_refund is False
     assert tx.needs_review is False
+    assert tx.needs_review_reason is None
     assert tx.source == "bank_import"
     assert tx.transfer_group_id is None
     assert tx.category is None
