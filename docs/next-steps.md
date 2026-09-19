@@ -274,8 +274,9 @@ Requirements gathering is well underway. Decided so far (all detailed in
       since there's no unique constraint on `(pattern, match_type, source)`. Not worth the added
       complexity for a single local user driving one correction at a time through the dashboard
       (NFR-1); revisit if this ever gets a second concurrent caller. 118 tests passing.
-   4. ~~**J5 — Needs-review queue**~~ — **Built** 2026-08-30, on branch
-      `feature/j5-needs-review-queue`. Tier-2 heuristic transfer matching added to
+   4. ~~**J5 — Needs-review queue**~~ — **Built** 2026-08-30 on branch
+      `feature/j5-needs-review-queue`, **merged to `main`** 2026-09-19 via PR #2 (CI green, merge
+      commit `f7b7237`). Tier-2 heuristic transfer matching added to
       `transfers/detection.py` (`process_transfer_detection` falls back to it whenever Tier-1
       finds nothing): three confidence bands per `docs/design-logic-and-ux.md` §2.3 — High (exact
       amount, same day) auto-links with no review; Medium (exact amount in the ±2-business-day
@@ -467,6 +468,29 @@ via test code — if it recurs, the fix (if the OneDrive theory holds) is runnin
 outside a synced folder, not adjusting test logic. CI runs on a GitHub-hosted runner (no OneDrive),
 so this has never shown up there. Not blocking; noted so a slow/flaky local frontend test run isn't
 mistaken for a real regression next time.
+
+## Local environment note (2026-09-19)
+
+While merging J5's PR (#2), two local tooling gaps surfaced, both environment-only — not code bugs:
+
+- **Local Python is broken**: `.venv/pyvenv.cfg` points at `C:\Python313\python.exe`, which no
+  longer exists on this machine (the venv's own recorded creation path also shows a different
+  Windows username — `rohan_ow776hq` — suggesting a profile/path change since it was created).
+  Neither `python` nor `python3` on PATH resolve to a real interpreter (Windows Store stub only).
+  Local `pytest` currently cannot be run until the venv is recreated against a real Python 3.11+
+  install. Not a regression in the code — CI (GitHub-hosted runner, no OneDrive) is unaffected and
+  is the verification path that gated this merge (green on PR #2).
+- **`git checkout` can fail mid-switch under OneDrive sync** (`unable to append to
+  '.git/logs/HEAD': Invalid argument`) — same OneDrive-sync suspicion already noted below for
+  Streamlit's `AppTest` timeouts, now hitting git's own ref-log writes. No data was lost (the
+  target branch ref itself is untouched; only the reflog append failed), but it leaves the
+  worktree/index checked out to the target while `HEAD` still names the old branch until retried.
+  Fixed by `git config core.windows.appendAtomically false`, then re-running the checkout — this
+  config is now unclear if it's local-only or should go in a tracked git config; recorded here so
+  a future session recognizes the error instead of assuming corruption.
+- **GitHub CLI (`gh`) is now installed** (via `winget install --id GitHub.cli --source winget`) and
+  authenticated as `mayekarr`, enabling PR-based merges from this session going forward (used for
+  PR #2). Wasn't set up as of J4's PR #1, which had to be created/merged manually.
 
 ## CI/CD (added 2026-08-23, off `main` — not part of a numbered journey)
 
