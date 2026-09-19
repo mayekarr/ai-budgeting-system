@@ -1,7 +1,7 @@
 # Next Steps
 
 Status: Active
-Last updated: 2026-08-25
+Last updated: 2026-09-19
 Companion to: `docs/product-requirements.md` (Draft v9) — read that first for full requirements
 detail; this doc is a resumable to-do list, not a requirements source of truth.
 
@@ -444,9 +444,18 @@ Requirements gathering is well underway. Decided so far (all detailed in
       "Save category" button (the low-confidence-category action) was the one action left not
       using the `_perform_action` helper the fourth pass introduced specifically to consolidate
       this pattern — switched over. 171 tests passing after this pass.
-   5. **J6 — Portfolio/asset view**. `Asset` entity, `GET /assets` endpoints, Portfolio page.
-   6. **J7 — Tax refund (YoY)**. A filter on top of J2's summary endpoint + a chip on Overview.
-   7. **J8 — Historical backfill**. Last, unchanged reasoning: needs the live pipeline proven on
+   5. **Compile a demo-ready feature list** (requested by Rohan 2026-09-19, before starting J6) —
+      a walkthrough of what's actually demoable today (J1–J5), in demo language (what to upload/
+      click, what it shows, what it proves) rather than a re-statement of the technical changelog
+      already in this doc. Source material: J1 (upload → parsing → rule/LLM categorisation →
+      transfer/refund detection), J2+J3 (Overview KPIs/spend chart + category drill-in), J4
+      (correcting a miscategorisation + rule learn-back), J5 (needs-review queue: category/refund/
+      transfer-match resolution, reason filtering). Needs a real upload run through the live app
+      (`run` skill) to pick concrete, working example transactions/categories to demo with, not
+      just a feature checklist.
+   6. **J6 — Portfolio/asset view**. `Asset` entity, `GET /assets` endpoints, Portfolio page.
+   7. **J7 — Tax refund (YoY)**. A filter on top of J2's summary endpoint + a chip on Overview.
+   8. **J8 — Historical backfill**. Last, unchanged reasoning: needs the live pipeline proven on
       real imports first, and `backend/api.py` currently imports the discard-verdict
       `ingestion`/`categorisation` modules directly (§8) — those get replaced as part of step 1
       above, not removed ahead of their replacement.
