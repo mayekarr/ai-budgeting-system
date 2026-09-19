@@ -3,6 +3,7 @@ __pycache__/
 finance.db
 .pytest_cache/
 logs/
+.venv/
 
 # Real personal bank statement / categorisation data — never commit, local-only.
 transaction-files/*.xlsx

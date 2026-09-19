@@ -473,13 +473,16 @@ mistaken for a real regression next time.
 
 While merging J5's PR (#2), two local tooling gaps surfaced, both environment-only — not code bugs:
 
-- **Local Python is broken**: `.venv/pyvenv.cfg` points at `C:\Python313\python.exe`, which no
-  longer exists on this machine (the venv's own recorded creation path also shows a different
-  Windows username — `rohan_ow776hq` — suggesting a profile/path change since it was created).
-  Neither `python` nor `python3` on PATH resolve to a real interpreter (Windows Store stub only).
-  Local `pytest` currently cannot be run until the venv is recreated against a real Python 3.11+
-  install. Not a regression in the code — CI (GitHub-hosted runner, no OneDrive) is unaffected and
-  is the verification path that gated this merge (green on PR #2).
+- ~~**Local Python is broken**~~ — **Fixed** 2026-09-19: `.venv/pyvenv.cfg` pointed at
+  `C:\Python313\python.exe`, which no longer existed on this machine (the venv's own recorded
+  creation path also showed a different Windows username — `rohan_ow776hq` — suggesting a
+  profile/path change since it was created); neither `python` nor `python3` on PATH resolved to a
+  real interpreter (Windows Store stub only). Installed Python 3.11 via
+  `winget install --id Python.Python.3.11`, recreated `.venv` from it, reinstalled
+  `requirements.txt`; bare `pytest` (the command `CLAUDE.md` documents, venv activated) now passes
+  all 171 tests locally in ~2.5 min. `.venv/` was untracked but not gitignored — added to
+  `.gitignore`. Wasn't a code regression at any point — CI (GitHub-hosted runner, no local Python
+  dependency) stayed green throughout and is what gated the J5 merge above.
 - **`git checkout` can fail mid-switch under OneDrive sync** (`unable to append to
   '.git/logs/HEAD': Invalid argument`) — same OneDrive-sync suspicion already noted below for
   Streamlit's `AppTest` timeouts, now hitting git's own ref-log writes. No data was lost (the
