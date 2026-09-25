@@ -65,18 +65,22 @@ each one actually matters.
    is charged from"), including whether a loan is its own `Asset`-like entity or a flag on
    `Account`, so categorisation can key off account context instead of fragile text patterns.
 4. **J7 — Tax refund (YoY).** A filter on top of `GET /summary` + a chip on Overview.
-5. **P3 — Remove Needs Review's per-row lookups** (currently 9 extra requests per render: one
-   suggested-match or transfer-group fetch per row) by returning that data in one call. Only saves
-   ~80ms once P1 lands, hence the lower priority.
-6. **MAC/MACACC/NBA statement parsers** (README-documented fast-follow — only the NAB-style CC/RC/
+5. **MAC/MACACC/NBA statement parsers** (README-documented fast-follow — only the NAB-style CC/RC/
    AC/JC formats parse today). Unblocks the full RC→MAC→MACACC transfer chain (§4.1) and should
    supply the missing counterparts for the 7 unlinked `-$5,000 "... Trans salary MAYEKAR A"` AC
    debits.
-7. **`possible_transfer_no_counterpart` review reason** — explicitly deferred by Rohan until a
-   complete extract from all accounts exists (i.e. after item 6). Reuse Tier-1's existing
+6. **`possible_transfer_no_counterpart` review reason** — explicitly deferred by Rohan until a
+   complete extract from all accounts exists (i.e. after item 5). Reuse Tier-1's existing
    reference-token extraction on the "no match found" path so the queue says "looks like a
    transfer, no match found" instead of a generic flag. Must **not** change `type` or totals — only
    a real linked counterpart can safely be excluded from expenses.
+7. **P3 — Remove Needs Review's per-row lookups — before J8** (moved here 2026-09-25, Rohan's
+   call). One suggested-match or transfer-group fetch per queue row; return the queue with that
+   data already attached, in one call (`docs/design-data-model-api.md` already plans a
+   `GET /transactions/needs-review` endpoint that never got built). Re-measured after P1/P2: the 9
+   lookups on today's 51-item queue cost **~17ms total**, only on a cold cache (first render or
+   right after a save) — invisible today. It only pays off at scale: the lookups grow with queue
+   size, so do it before J8's backfill can push hundreds of rows into Needs Review.
 8. **P4 — Batch the upload pipeline's DB queries — before J8.** A 347-row upload runs 2,637 SQL
    queries (~7.6 per row: rules and accounts reloaded per row, plus per-row dedup/refund/transfer
    lookups) — ~1.1s today, fine. J8's 14,349 rows would be ~110k queries, and Tier-2 transfer
