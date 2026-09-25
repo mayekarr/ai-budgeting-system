@@ -27,7 +27,71 @@ Requirements gathering is well underway. Decided so far (all detailed in
 - Scope reframed: the manual `Expense Log` process is being retired entirely — going forward, bank
   statement exports across **all** accounts are the only input.
 
+## Pending work — start here (consolidated priority order, updated 2026-09-25)
+
+Everything still open, in one place, in the order to do it. The detailed history and reasoning for
+each item lives further down this doc (and in `docs/product-requirements.md`); this list is the
+index. Performance items P1–P5 come from a measured review on 2026-09-25 (Rohan reported the app
+feeling slow) — kept in their recommended relative order, interleaved with the journey work by when
+each one actually matters.
+
+1. **P1 — Reuse one HTTP client in the dashboard** (`frontend/api_client.py`). Root cause of the
+   slowness: every `httpx.get(...)`/`httpx.patch(...)` call builds a brand-new client, which costs
+   ~202ms on this machine — measured ~233ms per request vs ~9ms with a reused client (25×). Needs
+   Review fires 10 requests per rerun (~2.3s per click today → ~0.1s after). Small, low-risk
+   change; existing tests mock at the function level, so they're unaffected. Backend read endpoints
+   themselves are fine (~10ms) and DB indexes are already in place.
+2. **P2 — Cache dashboard reads** with `st.cache_data`, cleared after every correction/confirm/
+   reject (all writes already go through `api_client.py`, so there's one place to clear it).
+   Streamlit reruns the whole page on every widget click and nothing is cached today, so unchanged
+   data is refetched on every interaction. Tradeoff: stale data if a write path ever forgets to
+   clear the cache.
+3. **J6 — Portfolio/asset view.** `Asset` entity, `GET /assets`, Portfolio page — **and** decide the
+   Account↔Asset link (e.g. "JC is the account 6 Jericho Ct's rent lands in and its loan interest
+   is charged from"), including whether a loan is its own `Asset`-like entity or a flag on
+   `Account`, so categorisation can key off account context instead of fragile text patterns.
+4. **J7 — Tax refund (YoY).** A filter on top of `GET /summary` + a chip on Overview.
+5. **P3 — Remove Needs Review's per-row lookups** (currently 9 extra requests per render: one
+   suggested-match or transfer-group fetch per row) by returning that data in one call. Only saves
+   ~80ms once P1 lands, hence the lower priority.
+6. **MAC/MACACC/NBA statement parsers** (README-documented fast-follow — only the NAB-style CC/RC/
+   AC/JC formats parse today). Unblocks the full RC→MAC→MACACC transfer chain (§4.1) and should
+   supply the missing counterparts for the 7 unlinked `-$5,000 "... Trans salary MAYEKAR A"` AC
+   debits.
+7. **`possible_transfer_no_counterpart` review reason** — explicitly deferred by Rohan until a
+   complete extract from all accounts exists (i.e. after item 6). Reuse Tier-1's existing
+   reference-token extraction on the "no match found" path so the queue says "looks like a
+   transfer, no match found" instead of a generic flag. Must **not** change `type` or totals — only
+   a real linked counterpart can safely be excluded from expenses.
+8. **P4 — Batch the upload pipeline's DB queries — before J8.** A 347-row upload runs 2,637 SQL
+   queries (~7.6 per row: rules and accounts reloaded per row, plus per-row dedup/refund/transfer
+   lookups) — ~1.1s today, fine. J8's 14,349 rows would be ~110k queries, and Tier-2 transfer
+   candidate scans grow with table size. Load rules/accounts once per upload. (Same efficiency
+   finding deferred back in J1.)
+9. **J8 — Historical backfill** from `docs/AU COST - Manual categorisation.xlsx` (Source 2).
+   Already proven valuable as a categorisation reference (the "Arvan" finding, 2026-09-25) — worth a
+   broader pattern-mining pass over the whole file as part of this.
+10. **P5 — Move the repo and `.venv` out of OneDrive.** Independent of everything above — can be
+    done any time. Likely cause of the slow/flaky local tests (2026-08-30 note), the `git checkout`
+    reflog errors (2026-09-19 note), and the repeated statement-file locks on 2026-09-25. Tradeoff:
+    loses OneDrive's backup, but GitHub now covers the code (real data files are gitignored and
+    would need their own backup).
+
+**Lower priority / no deadline:**
+- CI/CD: register a self-hosted runner and watch one CD run complete (see the CI/CD section below).
+- Account rename/merge tooling — `unrecognised_account` rows are currently visibility-only, with
+  no resolution action in the UI.
+- FR-9e refinement from J1: tag a lone signal-only transaction (e.g. `CREDIT CARD PAYMENT` uploaded
+  before its counterpart) as `Transfer` immediately, rather than only once both sides exist.
+- Cosmetic: null out `category` once a row becomes `type=Transfer` (18 linked rows still carry a
+  moot `Miscellaneous` value — invisible in every view, but misleading in a raw DB query).
+- Open question (`docs/product-requirements.md` §4.2): whether Medicare benefits should get the
+  same `Income` treatment as ATO tax refunds — flagged, not decided.
+
 ## Next steps (in priority order)
+
+_History of the original build plan, kept for context. For what to do next, use "Pending work —
+start here" above; it supersedes the ordering of the remaining items (J6–J8) below._
 
 1. ~~**Provide remaining sample files**~~ — **Substantially done** 2026-08-18. 6 more real accounts
    arrived (JC, RC, AC, MAC, MACACC, NBA), covering both salary sources, 3 distinct raw export
