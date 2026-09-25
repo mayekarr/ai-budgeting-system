@@ -22,12 +22,19 @@ import anthropic
 from sqlalchemy.orm import Session
 
 from backend.models import CategorisationRule
+from backend.needs_review_reasons import LLM_UNAVAILABLE
 from categorisation.taxonomy import TAXONOMY, is_valid_category
 
 logger = logging.getLogger(__name__)
 
 MODEL = "claude-haiku-4-5-20251001"
 CONFIDENCE_THRESHOLD = 0.7
+
+# The exact, stable substring of the SDK's own error message for "no api_key/auth_token/
+# credentials configured at all" (anthropic._client.Anthropic._validate_headers) -- used to tell
+# that specific, expected case apart from an unrelated TypeError elsewhere in this call, which
+# must not be silently swallowed (/code-review finding).
+_MISSING_AUTH_MESSAGE_MARKER = "Could not resolve authentication method"
 
 _TOOL_NAME = "categorise_transaction"
 _TOOL_SCHEMA = {
@@ -60,6 +67,10 @@ class FallbackResult:
     subcategory: Optional[str]
     confidence: float
     needs_review: bool
+    # None for a genuine (if low-confidence) model judgement; LLM_UNAVAILABLE when the API call
+    # itself failed and no real judgement was ever made -- callers need to tell these apart (a
+    # future upload keeps hitting the same wall in the latter case, unlike the former).
+    reason: Optional[str] = None
 
 
 def _get_client(client: Optional["anthropic.Anthropic"]) -> "anthropic.Anthropic":
@@ -79,6 +90,13 @@ def _build_prompt(raw_description: str) -> str:
     )
 
 
+def _unavailable_result() -> FallbackResult:
+    """Shared outcome for both "API unavailable" except branches below (/code-review finding —
+    kept them from silently diverging if this outcome ever needs to change)."""
+    return FallbackResult(category="Miscellaneous", subcategory=None, confidence=0.0,
+                           needs_review=True, reason=LLM_UNAVAILABLE)
+
+
 def categorise_with_fallback(
     session: Session,
     raw_description: str,
@@ -88,13 +106,29 @@ def categorise_with_fallback(
     """Call Claude for a transaction no rule matched, and promote a confident result to a new rule."""
     active_client = _get_client(client)
 
-    response = active_client.messages.create(
-        model=MODEL,
-        max_tokens=200,
-        tools=[_TOOL_SCHEMA],
-        tool_choice={"type": "tool", "name": _TOOL_NAME},
-        messages=[{"role": "user", "content": _build_prompt(raw_description)}],
-    )
+    try:
+        response = active_client.messages.create(
+            model=MODEL,
+            max_tokens=200,
+            tools=[_TOOL_SCHEMA],
+            tool_choice={"type": "tool", "name": _TOOL_NAME},
+            messages=[{"role": "user", "content": _build_prompt(raw_description)}],
+        )
+    except TypeError as exc:
+        # Only the SDK's specific "no auth resolvable" TypeError means "API unavailable" -- an
+        # unrelated TypeError (e.g. a future bad argument to messages.create) is a real bug and
+        # must propagate, not be silently downgraded to a review flag (/code-review finding).
+        if _MISSING_AUTH_MESSAGE_MARKER not in str(exc):
+            raise
+        logger.warning("Claude fallback unavailable for %r (no credentials configured); flagged for manual review.",
+                        raw_description)
+        return _unavailable_result()
+    except anthropic.AnthropicError as exc:
+        # Real API failures (auth rejected, network, rate limit, outage) -- distinct from a bad
+        # local call, and just as unable to produce a real categorisation as the TypeError case.
+        logger.warning("Claude fallback unavailable for %r (%s); flagged for manual review.",
+                        raw_description, exc)
+        return _unavailable_result()
 
     tool_use = next(block for block in response.content if block.type == "tool_use")
     category = tool_use.input["category"]

@@ -207,6 +207,23 @@ def test_low_confidence_category_save_calls_correct_transaction_category():
     mock_call.assert_called_once_with(1, category="Transport", subcategory=None)
 
 
+def test_llm_unavailable_shows_the_same_category_correction_as_low_confidence():
+    # llm_unavailable (no ANTHROPIC_API_KEY configured) is resolved the same way a genuine
+    # low-confidence result is -- a manual category correction -- not the unrecognised_account
+    # "visibility only" dead end.
+    items = [_tx(1, "llm_unavailable", category="Groceries")]
+    with patch("frontend.api_client.get_transactions", return_value=items):
+        at = _open_needs_review()
+        at.run()
+
+        with patch("frontend.api_client.correct_transaction_category") as mock_call:
+            at.selectbox(key="needs_review_category_1").select("Transport").run()
+            at.button(key="save_category_1").click().run()
+
+    assert not at.exception
+    mock_call.assert_called_once_with(1, category="Transport", subcategory=None)
+
+
 def test_unrecognised_account_shows_visibility_only_message():
     items = [_tx(1, "unrecognised_account")]
     with patch("frontend.api_client.get_transactions", return_value=items):

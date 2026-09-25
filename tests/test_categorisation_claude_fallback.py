@@ -8,6 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from backend.models import Base, CategorisationRule
+from backend.needs_review_reasons import LLM_UNAVAILABLE
 from categorisation.claude_fallback import CONFIDENCE_THRESHOLD, categorise_with_fallback
 from categorisation.rules import match_rule
 
@@ -89,6 +90,10 @@ def test_low_confidence_result_flags_needs_review_and_is_not_promoted(session):
     assert result.needs_review is True
     assert result.confidence < CONFIDENCE_THRESHOLD
     assert session.query(CategorisationRule).filter_by(source="llm_promoted").count() == 0
+    # Distinguishes a genuine low-confidence model judgement from the API being unreachable
+    # (/code-review finding on the API-unavailable fix below) -- callers must be able to tell them
+    # apart, since only the latter means every future upload will hit the same wall.
+    assert result.reason is None
 
 
 def test_taxonomy_invalid_pairing_is_not_promoted_even_at_high_confidence(session):
@@ -101,6 +106,33 @@ def test_taxonomy_invalid_pairing_is_not_promoted_even_at_high_confidence(sessio
 
     assert result.needs_review is True
     assert session.query(CategorisationRule).filter_by(source="llm_promoted").count() == 0
+
+
+def test_no_api_key_configured_flags_needs_review_instead_of_raising(session, monkeypatch):
+    # No `client` is injected and no real Claude credentials are available -- the state a fresh
+    # checkout is in before ANTHROPIC_API_KEY is ever set. This must degrade to a review flag, not
+    # raise (an unhandled SDK error here previously crashed the whole upload -- see
+    # docs/next-steps.md's 2026-09-25 note).
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    result = categorise_with_fallback(session, "SOME UNRECOGNISED MERCHANT TEXT")
+
+    assert result.needs_review is True
+    assert result.category == "Miscellaneous"
+    assert result.confidence == 0.0
+    assert result.reason == LLM_UNAVAILABLE
+    assert session.query(CategorisationRule).filter_by(source="llm_promoted").count() == 0
+
+
+def test_unrelated_type_error_from_the_api_call_is_not_swallowed(session):
+    # /code-review finding: catching bare TypeError around the API call must not also swallow an
+    # unrelated programming error (e.g. a future bad argument to messages.create) -- only the SDK's
+    # specific "no auth resolvable" TypeError is a real "flag for review" case.
+    client = MagicMock()
+    client.messages.create.side_effect = TypeError("create() got an unexpected keyword argument 'foo'")
+
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        categorise_with_fallback(session, "SOME MERCHANT", client=client)
 
 
 def test_uses_haiku_model_for_cost(session):

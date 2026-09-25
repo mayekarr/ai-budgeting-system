@@ -36,16 +36,28 @@ SEED_RULES: list[dict] = [
     dict(pattern='BOX HILL FISH MARKET', match_type="substring", category='Cafes & Restaurants', subcategory='Restaurants & Takeaway', priority=20),
     dict(pattern='RISE & BAKE CREPERIE', match_type="substring", category='Cafes & Restaurants', subcategory='Cafes & Coffee', priority=21),
     dict(pattern="TOBY'S ESTATE COFFEE", match_type="substring", category='Cafes & Restaurants', subcategory='Cafes & Coffee', priority=22),
-    dict(pattern='CHILDFUND AUSTRALIA', match_type="substring", category='Gifts & Donations', subcategory='Donations', priority=23),
+    # Broadened from 'CHILDFUND AUSTRALIA' (2026-09-25) -- that exact phrase, as seeded from Source
+    # 1/CC, never matches the real recurring donation text on JC ("CHILDFUNDAU SURRY HILLS", no
+    # space, no spelled-out "AUSTRALIA"). One shorter, still-distinctive pattern now covers both
+    # real variants instead of two overlapping rules.
+    dict(pattern='CHILDFUND', match_type="substring", category='Gifts & Donations', subcategory='Donations', priority=23),
     dict(pattern='NOA EAT DRINK SHARE', match_type="substring", category='Cafes & Restaurants', subcategory='Restaurants & Takeaway', priority=24),
     dict(pattern='WYNDHAM HOTEL GROUP', match_type="substring", category='Travel & Holidays', subcategory='Accommodation', priority=25),
     dict(pattern='AUSTRALIA THE GIFT', match_type="substring", category='Gifts & Donations', subcategory='Gifts', priority=26),
-    dict(pattern='FINANCE BY WYNDHAM', match_type="substring", category='Services & Subscriptions', subcategory='Other', priority=27),
+    # Fixed 2026-09-25 (Rohan's call, live): structurally a loan repayment financing a Wyndham
+    # timeshare purchase -- was Services & Subscriptions/Other. Categorised consistently with the
+    # AC property loan repayment rule (Loans & Finance/Loan Repayment) regardless of what asset the
+    # loan is financing. Distinct from the real "WYNDHAM VACATION CLUBS ..." membership/usage fee,
+    # which has no text rule of its own -- correctly resolved via the bank's own Category field
+    # instead (categorisation/bank_category.py).
+    dict(pattern='FINANCE BY WYNDHAM', match_type="substring", category='Loans & Finance', subcategory='Loan Repayment', priority=27),
     dict(pattern="HAIGH'S CHOCOLATES", match_type="substring", category='Cafes & Restaurants', subcategory='Restaurants & Takeaway', priority=28),
     dict(pattern='THAI NIGHT MARKETS', match_type="substring", category='Groceries', subcategory=None, priority=29),
     dict(pattern='TROPICAL PULSE QLD', match_type="substring", category='Travel & Holidays', subcategory='Attractions & Events', priority=30),
     dict(pattern='YARRA VALLEY WATER', match_type="substring", category='Housing', subcategory='Utility Bills', priority=31),
-    dict(pattern='ALLIANZ INSURANCE', match_type="substring", category='Insurance', subcategory=None, priority=32),
+    # Removed 2026-09-25 (/code-review finding): this exact-outcome rule ('Insurance', None) is
+    # now fully subsumed by the broader 'ALLIANZ' rule added below (priority 132) -- anything this
+    # one matched, that one also matches, identically. Kept as one rule, not two that could drift.
     dict(pattern='CHEMIST WAREHOUSE', match_type="substring", category='Health & Medical', subcategory='Medical', priority=33),
     dict(pattern='CODE BLACK COFFEE', match_type="substring", category='Cafes & Restaurants', subcategory='Cafes & Coffee', priority=34),
     dict(pattern='MELBOURNE AIRPORT', match_type="substring", category='Travel & Holidays', subcategory='Flights', priority=35),
@@ -66,7 +78,13 @@ SEED_RULES: list[dict] = [
     dict(pattern='TANK SIXTY FOUR', match_type="substring", category='Cafes & Restaurants', subcategory='Cafes & Coffee', priority=50),
     dict(pattern='URBAN PROVODORE', match_type="substring", category='Travel & Holidays', subcategory='Flights', priority=51),
     dict(pattern='COLONIAL FRESH', match_type="substring", category='Groceries', subcategory=None, priority=52),
-    dict(pattern='EVIE AUSTRALIA', match_type="substring", category='Travel & Holidays', subcategory='Other', priority=53),
+    # Broadened from 'EVIE AUSTRALIA' and recategorised 2026-09-25 (Rohan's call, live): Evie is an
+    # EV charging network -- a vehicle running cost (new Car/Charging subcategory), not a trip cost.
+    # The original 'EVIE AUSTRALIA' text never matched the real recurring text seen on CC
+    # ("EVIE NETWORKS BRISBANE"). A plain substring 'EVIE' also matches inside unrelated real words
+    # ("REVIEW" contains "EVIE") -- /code-review finding -- so this is a word-boundary regex
+    # instead, the one case in this file that needs it.
+    dict(pattern=r'\bEVIE\b', match_type="regex", category='Car', subcategory='Charging', priority=53),
     dict(pattern='GOPI KA CHATKA', match_type="substring", category='Cafes & Restaurants', subcategory='Restaurants & Takeaway', priority=54),
     dict(pattern='GUZMAN Y GOMEZ', match_type="substring", category='Cafes & Restaurants', subcategory='Restaurants & Takeaway', priority=55),
     dict(pattern='LITTLE BANGKOK', match_type="substring", category='Cafes & Restaurants', subcategory='Restaurants & Takeaway', priority=56),
@@ -80,7 +98,9 @@ SEED_RULES: list[dict] = [
     dict(pattern='POINT PARKING', match_type="substring", category='Transport', subcategory='Parking & Tolls', priority=64),
     dict(pattern='THE COURTYARD', match_type="substring", category='Cafes & Restaurants', subcategory='Restaurants & Takeaway', priority=65),
     dict(pattern='TRANSPORT NSW', match_type="substring", category='Transport', subcategory='Public Transport', priority=66),
-    dict(pattern='HILLS MEATS', match_type="substring", category='Services & Subscriptions', subcategory='Other', priority=67),
+    # Fixed 2026-09-25 (Rohan's call, live): a butcher shop, not Services & Subscriptions -- an
+    # error in the *original* Source 1 seed data itself, present since J1, not introduced later.
+    dict(pattern='HILLS MEATS', match_type="substring", category='Groceries', subcategory=None, priority=67),
     dict(pattern='KEBAB 2NITE', match_type="substring", category='Cafes & Restaurants', subcategory='Restaurants & Takeaway', priority=68),
     dict(pattern='RED CHUTNEY', match_type="substring", category='Cafes & Restaurants', subcategory='Restaurants & Takeaway', priority=69),
     dict(pattern='SOUL ORIGIN', match_type="substring", category='Cafes & Restaurants', subcategory='Restaurants & Takeaway', priority=70),
@@ -137,6 +157,50 @@ SEED_RULES: list[dict] = [
     dict(pattern='SUMO', match_type="substring", category='Housing', subcategory='Utility Bills', priority=121),
     dict(pattern='UBER', match_type="substring", category='Transport', subcategory='Taxis & Rideshare', priority=122),
     dict(pattern='2CO', match_type="substring", category='Services & Subscriptions', subcategory='Other', priority=123),
+    # Income coverage (added 2026-09-25) -- Source 1 (CC, a credit card) has zero income rows, so
+    # the rules above have zero Income coverage. Harmless while the Claude fallback could still
+    # recognise a salary/dividend credit; a real, silent gap now that the fallback is permanently
+    # unavailable (no ANTHROPIC_API_KEY, ever -- docs/product-requirements.md §4.3.1): every real
+    # income transaction landed in Miscellaneous, leaving GET /summary's total_income permanently
+    # $0. These three patterns are real, unambiguous, bank/processor-labelled markers pulled from
+    # the real AC/JC account data (transaction-files/) -- unlike the many genuinely ambiguous
+    # credits in that same data (informal repayments, unlinked transfer legs), which correctly stay
+    # in the needs-review queue rather than being force-categorised by a blanket rule.
+    dict(pattern='SALARY/WAGES', match_type="substring", category='Income', subcategory='Salary', priority=124),
+    dict(pattern='NAB INTERIM DIV', match_type="substring", category='Income', subcategory='Dividends & Distributions', priority=125),
+    dict(pattern='EQUATEPLUS DIVIDENDS', match_type="substring", category='Income', subcategory='Dividends & Distributions', priority=126),
+    # Real, unambiguous bank-labelled EMI/loan text (transaction-files/), same gap as above but on
+    # the expense side -- reported live by Rohan.
+    dict(pattern='LOAN REPAYMENT', match_type="substring", category='Loans & Finance', subcategory='Loan Repayment', priority=127),
+    dict(pattern='INTEREST CHARGED', match_type="substring", category='Loans & Finance', subcategory='Loan Interest', priority=128),
+    # Added 2026-09-25 after cross-referencing docs/AU COST - Manual categorisation.xlsx (13 years
+    # of Rohan's own manual categorisation): "Arvan" is a family member, historically tracked as
+    # its own recurring category (163 rows, 2012-2025) rather than left ambiguous. Subcategory left
+    # unset -- real spending purpose varies (food, gym, trip, fees), unlike the historical log's
+    # more granular per-purpose subcategories, which this project's current taxonomy has no exact
+    # equivalent for.
+    dict(pattern='ARVAN', match_type="substring", category='Kids & Family', subcategory=None, priority=133),
+    # Confirmed genuine income by Rohan (not an internal transfer) -- his employer pays into a CBA
+    # account not yet sampled in transaction-files/, which then moves to RC under this text; the
+    # RC-side credit is the only record of that income currently visible to this system.
+    dict(pattern='TRANSFER SALARY', match_type="substring", category='Income', subcategory='Salary', priority=129),
+    # Rent from a real investment property (Rohan's call, 2026-09-25) -- see taxonomy.py's new
+    # Rental Income subcategory. Keyed on the managing agent's name, which should generalise to
+    # future rent credits from the same property/agent, not just this one truncated description.
+    dict(pattern='THE APOSTOLI GRO', match_type="substring", category='Income', subcategory='Rental Income', priority=130),
+    # Real, unambiguous merchants reported live by Rohan, each independently confirmed against the
+    # real xlsx's own bank Category/Merchant Name columns (Donations/Oxfam Australia; Insurance/
+    # Allianz Insurance) -- see the "using bank Category/Merchant Name" note in docs/next-steps.md.
+    dict(pattern='OXFAM', match_type="substring", category='Gifts & Donations', subcategory='Donations', priority=131),
+    # Subcategory left unset -- the bank's own Category ("Insurance") doesn't say which of Life/
+    # TPD/Income Protection, Critical Illness, or Content (non-home) this policy is either.
+    dict(pattern='ALLIANZ', match_type="substring", category='Insurance', subcategory=None, priority=132),
+    # Deliberate low-priority, last-resort catch-all -- the bank's own Category for the real row
+    # that prompted this ("435 BOURKE STREET CAFE MELBOURNE") is itself "Uncategorised", so there's
+    # no bank signal to lean on for this one. Ordered after every specific named-merchant rule
+    # above (priority 200, not adjacent to them) so a real coffee chain's own rule always wins
+    # first; this only catches what nothing more specific already has.
+    dict(pattern='CAFE', match_type="substring", category='Cafes & Restaurants', subcategory='Cafes & Coffee', priority=200),
 ]
 
 

@@ -212,12 +212,12 @@ real accounts reviewed in §4.1:
 
 | # | Category | Sub-categories |
 |---|---|---|
-| 1 | `Income` | Salary, Interest, Dividends & Distributions (fallback — see note), Tax Refund, Government Rebate, Other |
+| 1 | `Income` | Salary, Interest, Dividends & Distributions (fallback — see note), Tax Refund, Government Rebate, Rental Income (**added** 2026-09-25 — a real investment-property rent credit had nowhere to go but `Other`, see `docs/next-steps.md`), Other |
 | 2 | `Housing` | Rent, Mortgage EMI, Home Insurance, Utility Bills, Maintenance/Content |
 | 3 | `Groceries` | — |
 | 4 | `Cafes & Restaurants` | Restaurants & Takeaway, Cafes & Coffee |
 | 5 | `Transport` | Public Transport, Taxis & Rideshare, Parking & Tolls |
-| 6 | `Car` | EMI, Insurance, Petrol, Registration, Other |
+| 6 | `Car` | EMI, Insurance, Petrol, Charging (**added** 2026-09-25 — an EV-charging-network debit had nowhere to go but `Travel & Holidays/Other` via the bank-category fallback, see `docs/next-steps.md`), Registration, Other |
 | 7 | `Travel & Holidays` | Flights, Accommodation, Attractions & Events, Other |
 | 8 | `Shopping` | Clothes, Electronics & Technology, Homeware, Other |
 | 9 | `Health & Medical` | Medical, Gym & Fitness |
@@ -234,6 +234,26 @@ attribute (4.3.2), not a category; `Investment` becomes the `Investment`/`Asset`
 old `Investment` subcat (`Hillside`/`JerichoCt`/`Alexa`/`Sylvania` → Real Estate; `MLC`/`NAB Share`/
 `Barkley` → Shares/Managed Fund) becomes one `Asset` record. `Housing` is the *primary residence*
 only — investment properties route to the `Investment`/`Asset` entity, not `Housing`.
+
+**Clarifying guidance, added 2026-09-25 (Rohan's call, live) — `Transport` vs. `Car` vs.
+`Travel & Holidays` boundary.** Flagged as confusing after two real categorisation calls exposed
+the ambiguity: an EV-charging debit (Evie) and a timeshare finance repayment (Wyndham), both
+initially miscategorised into `Travel & Holidays` by the bank-category fallback
+(`categorisation/bank_category.py`) simply because they were travel-*adjacent*. The working rule
+going forward, established by those two decisions:
+- `Transport` = everyday getting-around costs, **by mode** (public transport, taxis/rideshare,
+  parking/tolls) — regardless of trip context. A taxi ride during a holiday is still `Transport`,
+  not `Travel & Holidays`.
+- `Car` = vehicle **ownership/running** costs (EMI, insurance, petrol, charging, registration) —
+  independent of trip context. EV charging is the electric equivalent of petrol, not a trip cost.
+- `Travel & Holidays` = the **trip itself** — flights (the journey), accommodation (where you
+  stay), attractions & events (what you do), and financing/membership costs tied to a
+  travel-specific asset (e.g. a timeshare *usage* fee). It does **not** cover transport modes or
+  vehicle running costs that happen to be used during a trip, nor a loan repayment financing a
+  travel-related asset — that's `Loans & Finance`, same as any other loan, regardless of what it's
+  financing (see the Wyndham finance vs. Wyndham vacation-club-fee split in `docs/next-steps.md`).
+The test: *is this cost about the trip itself, or about a vehicle/transport mode/loan that's
+incidentally used during (or financing) one?* The latter stays in its own category.
 
 **Scoped exception to 4.3.2, decided 2026-08-18 (user preference):** an ATO tax refund isn't like a
 merchandise refund — it doesn't relate to one specific prior transaction, it's a lump-sum return
@@ -320,6 +340,19 @@ FR-10's low-confidence flag. **Resolved in step 5 design** — see `docs/design-
 chosen for consistency with the project's own Claude-Code-based dev workflow. Not a runtime decision
 implied by the earlier removal of the `openai` package (that was for the retired dev-tooling script
 only, see `docs/agentic-workflow.md`).
+
+**No `ANTHROPIC_API_KEY` in practice — decided 2026-09-25.** Rohan won't be purchasing separate
+console.anthropic.com API billing (his Claude Code usage is via a Claude Pro subscription, a
+different product/billing entirely). This means the LLM fallback is realistically **never** called
+in this user's actual usage — every unmatched merchant permanently routes through FR-10's
+needs-review flag instead. `categorisation/claude_fallback.py` was fixed the same day to degrade to
+that outcome (`category=Miscellaneous`, `confidence=0.0`, `needs_review=True`, no rule promoted)
+whenever the Claude API call fails for any reason — no key configured, auth rejected, network/rate
+limit/outage — rather than raising and rolling back the entire upload (the prior, unhandled
+behaviour). Rule-based matching (4.3.1's seed rules + FR-9 user-correction rules) is therefore
+carrying more real weight than originally designed for; if the needs-review queue ends up
+permanently large in practice, revisit seeding more rules by hand rather than assuming LLM coverage
+will fill the gap.
 
 #### 4.3.2 Decision: refund handling — DECIDED
 

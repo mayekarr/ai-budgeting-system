@@ -1,7 +1,7 @@
 # Next Steps
 
 Status: Active
-Last updated: 2026-09-19
+Last updated: 2026-09-25
 Companion to: `docs/product-requirements.md` (Draft v9) — read that first for full requirements
 detail; this doc is a resumable to-do list, not a requirements source of truth.
 
@@ -444,16 +444,371 @@ Requirements gathering is well underway. Decided so far (all detailed in
       "Save category" button (the low-confidence-category action) was the one action left not
       using the `_perform_action` helper the fourth pass introduced specifically to consolidate
       this pattern — switched over. 171 tests passing after this pass.
-   5. **Compile a demo-ready feature list** (requested by Rohan 2026-09-19, before starting J6) —
-      a walkthrough of what's actually demoable today (J1–J5), in demo language (what to upload/
-      click, what it shows, what it proves) rather than a re-statement of the technical changelog
-      already in this doc. Source material: J1 (upload → parsing → rule/LLM categorisation →
-      transfer/refund detection), J2+J3 (Overview KPIs/spend chart + category drill-in), J4
-      (correcting a miscategorisation + rule learn-back), J5 (needs-review queue: category/refund/
-      transfer-match resolution, reason filtering). Needs a real upload run through the live app
-      (`run` skill) to pick concrete, working example transactions/categories to demo with, not
-      just a feature checklist.
+   5. ~~**Compile a demo-ready feature list**~~ — **Done** 2026-09-25, `docs/demo-feature-list.md`.
+      Built from a real upload run through the live app (backend + dashboard via the `run` skill),
+      not written from memory. **Two real gaps found in the process, not previously exercised
+      end-to-end**:
+      (a) only 4 of the 7 real sample account files (CC/RC/AC/JC — all NAB-style) actually parse;
+      MAC/MACACC/NBA use a different export shape, confirming in practice the README's already-
+      documented "Macquarie-style and headerless-CommBank-style formats are a fast-follow" gap —
+      so the full RC→MAC→MACACC transfer chain (§4.1) still can't be demoed end-to-end, only the
+      AC↔JC and JC↔CC pairs;
+      (b) no `ANTHROPIC_API_KEY` is set in this environment (Rohan has a Claude Pro subscription,
+      not separate console.anthropic.com API billing — these are different products/billing), so
+      every upload with an unmatched merchant 500'd and rolled back entirely (`claude_fallback.py`
+      has no error handling around the API call itself — only around file I/O/persistence, per the
+      earlier J1 review fix). Worked around for this session only by stubbing
+      `categorise_with_fallback` at the process level (same seam the test suite mocks) so the real
+      parsing/rule-matching/transfer/refund/needs-review pipeline could still run on real data
+      without a key — **not a code change**, a throwaway driver script, nothing committed. Real,
+      concrete examples pulled from that run for J1 (clean rule matches, an AC↔JC salary transfer
+      pair, a JC↔CC credit-card-autopay transfer pair, a Spotlight refund), J2/J3, J4 (live-tested:
+      corrected `435 BOURKE STREET CAFE MELBOURNE` via `PATCH /transactions/6`, confirmed
+      `needs_review` cleared and the *other two* real occurrences of the same merchant elsewhere in
+      the upload stayed unchanged — confirms the "not retroactive" design decision live, not just
+      by reading the code), and J5 (real `unrecognised_account`/`refund_ambiguity`/`transfer_match`
+      examples — none of those three reasons touch the LLM, so they're genuine, not stub artifacts).
+      **`finance.db` currently holds that stubbed run's data** — flagged prominently in the new doc
+      (don't quote its Overview totals; the stub dumped every LLM-fallback row into `Miscellaneous`,
+      including real salary credits that should be `Income`). Left in place rather than deleted
+      (sandbox denied the delete as a destructive action outside an explicit user ask) — **before
+      the real demo or before starting J6, get a real API key from console.anthropic.com, delete
+      `finance.db`, and re-upload fresh** so J6's asset work and the actual demo both start from
+      genuine data, not this session's placeholder categorisation.
+      **Same day, follow-up**: Rohan asked for a step-by-step "how to run this demo" guide, plus a
+      built-vs-coming-soon feature summary, added to the same doc rather than a separate file — a
+      "What's built vs. what's coming" table (J1–J5 done, J6/J7/J8 + Phase 2 next, sourced from this
+      doc so it can't drift) and an 8-step "How to run this demo" section (get/set a real API key,
+      reset `finance.db`, start backend, start dashboard, upload CC→RC→AC→JC in that order and why,
+      walk the journeys, shut down) upstream of the detailed per-journey talking points, so a cold
+      reader (or Rohan, cold) can actually run it start to finish, not just know what to say once
+      it's running.
+      **Same day, second follow-up — real code fix, not just a demo workaround**: Rohan confirmed
+      he will not purchase console.anthropic.com API billing, ever (Claude Pro is a separate
+      product). That makes "no `ANTHROPIC_API_KEY`" this user's permanent operating mode, not a
+      temporary environment gap — so `categorisation/claude_fallback.py`'s unhandled-crash-on-
+      missing-auth (the 500-and-rollback behaviour from earlier this same day) is a real bug now,
+      not a one-off. Fixed tests-first per the `tdd-workflow` skill (touches `categorisation/`):
+      two new tests (`test_no_api_key_configured_flags_needs_review_instead_of_raising` in
+      `tests/test_categorisation_claude_fallback.py`; `test_upload_succeeds_without_configured_llm_
+      credentials` in `tests/test_api_upload.py`) confirmed red against the real, unmocked
+      `anthropic.Anthropic()` client (no `client=` injected, `ANTHROPIC_API_KEY` explicitly
+      unset) — both hit the SDK's own `TypeError` for unresolvable auth, proving the crash was real
+      end-to-end, not just theorised. Fix: `categorise_with_fallback`'s API call is now wrapped in
+      `except (anthropic.AnthropicError, TypeError)` — `AnthropicError` covers real API failures
+      (auth rejected, network, rate limit, outage); the bare `TypeError` is the SDK's own documented
+      client-side behaviour for no api_key/auth_token/credentials configured at all, raised before
+      any request is sent. Either way, degrades to `category=Miscellaneous`, `confidence=0.0`,
+      `needs_review=True`, no rule promoted — the same outcome a genuinely low-confidence LLM result
+      already produces, just reached without ever calling the API. Verified live against the real,
+      unmodified `uvicorn backend.api:app` (no stub script): a brand-new, rule-unmatched merchant
+      now imports successfully and lands in the needs-review queue instead of 500ing.
+      **`/code-review medium` pass 1 — 2 findings, both fixed**: (a) catching bare `TypeError`
+      broadly around the API call would also swallow an unrelated future programming error (e.g. a
+      bad argument to `messages.create`), silently downgrading a real bug to "flagged for review" —
+      fixed by checking the exception message for the SDK's own specific "Could not resolve
+      authentication method" text and re-raising anything else (test added:
+      `test_unrelated_type_error_from_the_api_call_is_not_swallowed`). (b) a missing/invalid API
+      credential (a systemic, every-upload outage) and a genuine low-confidence LLM judgement for
+      one merchant both reported as the same `needs_review_reason=low_confidence_category`,
+      indistinguishable in the queue — an operator would misdiagnose a total outage as isolated
+      per-merchant uncertainty. Fixed by adding a new `needs_review_reason` value,
+      `llm_unavailable` (`backend/needs_review_reasons.py`, same precedence tier as
+      `low_confidence_category`), threaded from `FallbackResult.reason` through
+      `backend/api.py`'s upload handler; `_resolve_review_flag` widened to accept multiple
+      addressed reasons so a category correction clears either one
+      (`_resolve_review_flag(tx, LOW_CONFIDENCE_CATEGORY, LLM_UNAVAILABLE)`); the Needs-Review page
+      routes `llm_unavailable` through the same category-correction widget as
+      `low_confidence_category`, not the `unrecognised_account` visibility-only dead end. 4 more
+      tests added across the categorisation/API/frontend layers. **`/code-review medium` pass 2,
+      against the fixed diff — 0 findings.** 176 tests passing (171 + 5 new across both passes).
+      `docs/product-requirements.md` §4.3.1 updated with this as a standing decision (LLM fallback
+      is realistically never invoked for this user; rule-based matching carries more real weight
+      than originally designed for — revisit rule-seeding effort if the needs-review queue stays
+      permanently large in practice, and watch the `llm_unavailable` reason specifically once it
+      exists as a queue filter). `docs/demo-feature-list.md`'s run guide and J1/J5 sections updated
+      to drop the mandatory-API-key framing, the now-unnecessary stub script, and to name
+      `llm_unavailable` as the reason this demo will show most.
+      **Same day, third follow-up — a round of real defects found running the actual demo, not
+      code review**: Rohan ran the live app after the `llm_unavailable` fix and reported "a lot of
+      defects", starting with Overview's `total_income` KPI reading $0 despite real salary/dividend
+      rows in the uploaded data. Root cause, confirmed against the live `finance.db`: the 123 seed
+      rules were derived only from Source 1 (CC, a credit card — zero income rows ever pass through
+      a credit card), so there was **zero rule coverage for the `Income` category** — and with the
+      LLM fallback now permanently unavailable, every real income transaction had no path to ever
+      be recognised, landing in `Miscellaneous` forever. Fixed tests-first: three new seed rules
+      for the real, unambiguous, bank/processor-labelled patterns actually present in the AC/JC
+      data (`SALARY/WAGES` → Income/Salary, `NAB INTERIM DIV` and `EQUATEPLUS DIVIDENDS` → Income/
+      Dividends & Distributions) — deliberately **not** a blanket rule catching every credit, since
+      the same real data has plenty of genuinely ambiguous credits (informal friend repayments, an
+      unlinked transfer leg) that correctly belong in the needs-review queue, not force-categorised.
+      `total_income` went from $0 to $48,585.90 against the real uploaded data (12 rows now
+      correctly `category=Income`). Test: `test_summary_includes_earnings_breakdown_by_subcategory`
+      plus a full upload-to-summary end-to-end test with no API key configured, matching this user's
+      real environment.
+      Rohan then asked for a drill-down for earnings (mirroring Category Drill-in's spend UX).
+      Added `by_income_category` to `GET /summary` (Income rows grouped by `subcategory` — Salary/
+      Dividends/Tax Refund/... is the meaningful earnings axis, since every income row already
+      shares `category=Income`) and a new "Earnings by Source" chart on Overview. Deliberately
+      reused the *existing* "Drill into a category" selector/link for the actual drill-through
+      (append `"Income"` to its options) rather than adding a second, competing selector — two
+      unconditional "sync `drill_in_category` on every render" writers side by side would race each
+      other for control of the same `st.session_state` key every rerun, silently breaking whichever
+      one rendered first. `Category Drill-in` already listed Income as a selectable category and
+      showed `subcategory` per row (built in J2/J3, just never linked from Overview) — no change
+      needed there.
+      Rohan then reported two more, both traced to real rows in the live data: (a) several more
+      `SALARY/WAGES`-adjacent Income rows *still* showing `Miscellaneous`, and (b) no category for
+      EMI/bank-loan payments. Investigation found these were two **different** root causes, not one:
+      - (b) was simple and real: zero seed-rule coverage for `Loans & Finance`, same class of gap as
+        the Income fix. Added one rule (`LOAN REPAYMENT` → Loans & Finance/Loan Repayment) for the
+        real `LOAN REPAYMENT TO A/C 703206283 MAYEKAR A` EMI debit.
+      - (a) turned out to be **two distinct cases**, only one of which was a real bug:
+        1. **Real bug, fixed**: the two real AC↔JC "Trans salary" pairs that Tier-1 *does*
+           successfully link into a `TransferGroup` still showed `Miscellaneous`/`needs_review=True`
+           even after linking — `link_transfer_pair` (`transfers/detection.py`, shared by Tier-1 and
+           Tier-2 High) set `type=Transfer` on both legs but never touched `needs_review` at all.
+           This is the exact "known, deliberately deferred gap" already called out in this doc under
+           J5 (§ above) — previously low-priority because it was rare; now common and visibly
+           confusing because `llm_unavailable` fires on nearly every unmatched row. Fixed: a
+           confident (Tier-1 or Tier-2 High) link now clears a pre-existing `needs_review` flag on
+           both legs, using the same `should_supersede` precedence rule already used everywhere else
+           in this codebase (`unrecognised_account` still never cleared). Category is moot on a
+           Transfer row either way (`GET /summary` excludes `type=Transfer` outright), matching
+           `docs/design-logic-and-ux.md` §2.3's own "High confidence... auto-links with no review."
+           4 new tests (`test_tier1_link_clears_a_moot_pre_existing_review_reason`,
+           `test_tier1_link_never_clears_unrecognised_account`,
+           `test_tier2_high_band_clears_a_moot_pre_existing_review_reason`, plus strengthening the
+           pre-existing Tier-2-High test which only checked the default-False case and couldn't
+           actually have caught this bug).
+        2. **Not a bug — a real, currently-unfixable data gap, called out rather than papered over**:
+           7 more `-$5,000 "Trans salary"` debits (AC-side) have **no matching credit leg anywhere
+           in the currently-uploaded data** — their counterpart almost certainly landed on MAC,
+           MACACC, or NBA (the account export formats the parser doesn't support yet — same
+           already-documented gap as the RC→MAC→MACACC chain above) or outside JC's uploaded date
+           range. They correctly stay `type=Expense`, flagged `needs_review`/`llm_unavailable` —
+           forcing them to `Income` or `Transfer` without a real second leg would be actively wrong,
+           not a fix. Revisit once MAC/MACACC/NBA parsing exists (or more months of JC/AC data).
+      `/code-review medium` run against this diff — **0 findings** (a fourth clean pass in a row on
+      this session's work). 186 tests passing (171 → 186 across this whole session's follow-ups).
+      `finance.db` reset and the 4 real files (CC/RC/AC/JC) re-uploaded after each fix so the live
+      demo reflects current behaviour — both new seed rules and the transfer-link fix only apply
+      going forward through the upload pipeline, not retroactively to already-persisted rows.
+      **Same day, fourth follow-up — one more defect-triage round**: Rohan kept driving the live
+      app and found three more real rows still in `Miscellaneous`: (a) a $5,000 "ROHAN MAYEKARtransfer
+      salary" credit (RC account) with no matching debit anywhere in the uploaded data; (b) a
+      $2,704.86 "6 Jericho Ct Berwi The Apostoli Gro..." credit (JC account); (c) two
+      "INTEREST CHARGED FROM A/C ..." debits (JC account). Unlike the earlier fixes, (a) and (b)
+      were genuine judgement calls, not derivable from the data alone — asked Rohan directly rather
+      than guess:
+      - (a) confirmed **genuine income**, not an internal transfer: Rohan's employer pays into a
+        CBA account not yet sampled in `transaction-files/`, which then moves to RC under this
+        text — the RC-side credit is currently the *only* visible record of that income. New seed
+        rule: `TRANSFER SALARY` → Income/Salary (deliberately distinct substring from Anila's own
+        already-correctly-linked `Trans salary` transfer pattern, so it can't collide).
+      - (b) confirmed real investment-property rent; Rohan asked for a proper `Rental Income`
+        subcategory rather than filing it under the generic `Other`, even though Income's
+        subcategory list was explicitly marked finalized 2026-08-18 — added, and
+        `docs/product-requirements.md` §4.2's table updated (the one addition since finalization).
+        New seed rule: `THE APOSTOLI GRO` (the managing agent's name) → Income/Rental Income.
+      - (c) unambiguous, same pattern as the `LOAN REPAYMENT` fix already made: new seed rule
+        `INTEREST CHARGED` → Loans & Finance/Loan Interest.
+      3 new tests (`test_rohan_transfer_salary_credit_matches_to_income`,
+      `test_investment_property_rent_credit_matches_to_income_rental`,
+      `test_loan_interest_charge_matches_to_loans_and_finance`). `/code-review medium` run against
+      this diff — **0 findings**. 189 tests passing.
+      `total_income` against the real uploaded data: $48,585.90 → **$61,290.76**
+      (Salary $57,797.95, Rental Income $2,704.86, Dividends & Distributions $787.95).
+      **Design idea raised by Rohan, deliberately deferred to J6 rather than bolted on now**: every
+      fix in both defect-triage rounds has been a text-pattern seed rule, which is inherently
+      fragile (a new agent name, a new bank reference format, and the same real-world income/expense
+      silently stops matching again). Rohan asked whether recording the investment property and
+      loan account details explicitly would make this more robust — yes: `CategorisationRule` today
+      has zero account-scoping (matches purely on description text, regardless of which `Account`
+      a transaction is on), and `Account` has no link to what it represents. `docs/design-data-
+      model-api.md` already designs an `Asset` entity (type + name) for J6, covering real estate and
+      shares — the natural extension is linking specific `Account`s to an `Asset` (e.g., "JC is the
+      account 6 Jericho Ct's rent lands in and its loan interest is charged from"), so
+      categorisation/reporting could reason at the account level instead of hoping text patterns
+      stay stable forever. Rohan's call: fold this into J6's design rather than design it ad hoc
+      mid-fix — **J6 must now explicitly consider an Account↔Asset link (not just the Asset entity
+      alone) as part of its design pass**, including whether a loan is modeled as its own
+      `Asset`-like entity or a flag/link on `Account`.
+      **Same day, fifth follow-up — a real architecture change, not another one-off rule**: Rohan
+      then reported three more `Miscellaneous` misses (OXFAM, CHILDFUND, ALLIANZ) plus one obvious
+      one (a cafe whose own name literally says "cafe") and asked directly: is
+      `categorisation/rules.py` even using the bank's own `Category`/`Merchant Name` columns? It
+      wasn't — `Category` was read only as a narrow refund-detection signal
+      (transfers/refunds.py), and `Merchant Name` was parsed by pandas and discarded entirely,
+      despite `Transaction.merchant` already existing as a column (always persisted `None`).
+      Quantified before building anything: **409 of 422 real rows (97%) across CC/RC/AC/JC carry a
+      non-blank bank Category**, and every manually-checked case (Donations/Oxfam, Insurance/
+      Allianz, Cafe & coffee) was accurate — confirming this is a different, narrower question than
+      §4.1's finding (bank categories unreliable *as a transfer/refund type signal* — a real
+      invoice mislabelled "Transfers out" — says nothing about their reliability for general spend/
+      income classification). After that quantified finding, Rohan's explicit instruction: use the
+      bank's own data as the general mechanism instead of continuing to hand-write one-off text
+      rules for every merchant found live.
+      Built tests-first: `ingestion/nab_format.py`'s `ParsedRow` gained `raw_merchant` (now stored
+      on `Transaction.merchant`, closing the separate discard-it gap); new
+      `categorisation/bank_category.py` — a small, curated, hand-reviewed mapping from ~26 real
+      observed bank `Category` values to this project's own taxonomy, **deliberately excluding**
+      exactly the transfer/refund-labelled values §4.1 already found unreliable (`Internal
+      transfers`/`Transfers out`/`Transfers in`/`Refund`/`Credit card repayments`) plus
+      `Uncategorised` (no signal), so this doesn't reintroduce that finding. Wired into
+      `backend/api.py`'s upload handler as a third categorisation tier — a `CategorisationRule`
+      match (including a user correction) always wins first, this bank-category mapping is the new
+      second line of defence, the Claude fallback (permanently unavailable, §4.3.1) is last —
+      rather than promoting a rule the way the LLM fallback does (the bank's own data is present on
+      essentially every row of a supported export already, so there's no cost to re-derive it fresh
+      each upload, unlike an API call).
+      8 new tests across `tests/test_ingestion_nab.py`, `tests/test_categorisation_bank_category.py`
+      (new file), and `tests/test_api_upload.py`. Two `/code-review medium` passes: **pass 1 found
+      1 finding** (the module-level docstring in `ingestion/nab_format.py` still claimed bank
+      Category is "never trusted as the classification output," contradicting the new mechanism a
+      few lines below it — fixed); **pass 2 — 0 findings**. 199 tests passing.
+      **Verified live against the real uploaded data (CC/RC/AC — JC was mid-upload, file-locked by
+      Excel at the time)**: `Miscellaneous` dropped to 60 of 409 rows (14.7%), and — checked, not
+      assumed — every one of those 60 remaining rows' real bank `Category` value was confirmed to
+      be exactly `Uncategorised` or a deliberately-excluded transfer/refund label, meaning the
+      mapping isn't missing any legitimate case; what's left is genuinely unresolvable without more
+      data (MAC/MACACC/NBA support) or human judgement. With JC included once unlocked: 422 total
+      rows, 68 `Miscellaneous` (16.1%), `total_income` $61,290.76 (unchanged from before this round
+      — JC's specific rows were already fixed by the previous round's text rules; this round's win
+      is entirely on rows *those* rules didn't cover).
+      **Same day, sixth follow-up — real seed-data + taxonomy-boundary fixes, not more one-off
+      rules**: Rohan reviewed the remaining `Miscellaneous` rows and found: (a) "HILLS MEATS PTY
+      LTDHILLS Forest Hill 036" (a butcher) miscategorised `Services & Subscriptions/Other` — a bug
+      in the *original* 123-rule Source 1 seed set itself, present since the very first J1 build
+      increment, not introduced this session; (b) Evie (an EV-charging network) landing in
+      `Travel & Holidays/Other` via the new bank-category fallback's generic "Travel expenses"
+      entry; (c) "FINANCE BY WYNDHAM PTY BUNDALL" (a timeshare finance/loan repayment) in
+      `Services & Subscriptions/Other`, distinct from the real "WYNDHAM VACATION CLUBS ..."
+      membership fee (correctly `Travel & Holidays/Accommodation` via the bank-category mapping,
+      no text rule of its own); (d) an explicit question — is `Transport` vs. `Travel & Holidays`
+      confusing? (b) and (c) were genuine judgement calls, not derivable from the data alone —
+      asked Rohan directly:
+      - (a) fixed: `HILLS MEATS` → Groceries (no subcategory).
+      - (b) Rohan's call: EV charging is a vehicle running cost, not a trip cost. New `Car/Charging`
+        subcategory added (taxonomy.py, same precedent as Rental Income); broadened
+        `EVIE AUSTRALIA` (never matched the real recurring "EVIE NETWORKS BRISBANE" text) to `EVIE`
+        → Car/Charging.
+      - (c) Rohan's call: a loan repayment is `Loans & Finance` regardless of what asset it's
+        financing, consistent with the AC property loan repayment rule already in place. Fixed
+        `FINANCE BY WYNDHAM` → Loans & Finance/Loan Repayment.
+      - (d) Rohan confirmed documenting the resulting boundary as explicit guidance, rather than
+        leaving it implicit: `docs/product-requirements.md` §4.2 now states the working rule —
+        `Transport` = everyday getting-around costs by mode, regardless of trip context;
+        `Car` = vehicle ownership/running costs, regardless of trip context; `Travel & Holidays` =
+        the trip itself (flights/accommodation/attractions/travel-specific financing like a
+        timeshare *usage* fee) — never a transport mode, vehicle cost, or loan repayment that's
+        merely incidental to (or financing) a trip.
+      4 new tests, 202 tests passing pre-review. Verified live against all 4 real files fresh at
+      that point: `Miscellaneous` 68/422 (16.1%, unchanged count — these 4 fixes moved specific
+      rows between non-Miscellaneous categories, not out of Miscellaneous); HILLS MEATS →
+      Groceries, EVIE → Car/Charging, FINANCE BY WYNDHAM → Loans & Finance/Loan Repayment all
+      confirmed live.
+      **`/code-review medium` pass 1 — 2 findings, both fixed**: (a) broadening `EVIE AUSTRALIA` to
+      a bare substring `EVIE` also matches inside unrelated real words — "REVIEW" contains "EVIE"
+      (R-**EVIE**-W) — so a bank message like "CARD REVIEW REQUIRED" would have been silently
+      miscategorised Car/Charging; fixed by switching that one rule to a word-boundary regex
+      (`r'\bEVIE\b'`, `match_type="regex"` — the one rule in the seed set that needs it) rather than
+      plain substring (test added:
+      `test_evie_rule_does_not_false_positive_on_unrelated_words_containing_the_letters`). (b) the
+      new broad `ALLIANZ` rule fully subsumed a pre-existing, more specific `ALLIANZ INSURANCE`
+      rule (same `Insurance`/`None` outcome for anything the old one matched) — the old rule was
+      dead weight, two rules that could silently drift apart on a future edit to just one; removed
+      it (test added: `test_no_duplicate_allianz_rule`). 204 tests passing.
+      **`/code-review medium` pass 2 — 2 more findings, both documentation-accuracy issues from
+      *earlier* rounds this session, not new bugs, both fixed**: (a) the stale-needs_review-flag
+      fix's docstring (`transfers/detection.py::link_transfer_pair`, added a few rounds back)
+      wrongly claimed Tier-2 Medium-band matches "go through `_flag_transfer_match` instead" of
+      this function — they don't; `_process_tier2` calls `link_transfer_pair` for Medium too,
+      immediately followed by `_flag_transfer_match(type_changed=True)`, which re-flags
+      `needs_review` back to `True`/`TRANSFER_MATCH` right after. Today's behaviour is correct
+      (existing tests `test_tier2_exact_amount_within_window_auto_links_medium_confidence_flagged`
+      etc. already cover the true end state) only because those two calls always run back-to-back
+      — a real landmine for a future refactor that reorders or separates them, silently leaving a
+      Medium match unflagged and invisible to the Needs-Review queue. Docstring corrected to state
+      this dependency explicitly as a "do not reorder without re-verifying" note, rather than
+      claiming an invariant the code doesn't actually have; no behaviour change (already covered by
+      existing tests). (b) the bank-category mechanism's own `ParsedRow.raw_merchant` comment
+      claimed it was "consulted by categorisation/bank_category.py" — it isn't;
+      `categorise_from_bank_category()` only ever reads `raw_bank_category`. Comment corrected.
+      204 tests passing, unchanged (both were comment-only fixes). CC.xlsx freed up shortly after
+      and was re-uploaded — all 4 real files confirmed live with this round's fixes.
+      **Same day, seventh follow-up — a measurement bug on my (the assistant's) side, plus a real,
+      explicitly deferred to-do**: Rohan reported seeing 50 Miscellaneous rows live, not the 68 I'd
+      reported. Root cause: my "68" was a raw `category='Miscellaneous'` count across *all*
+      transactions, including 18 rows that are actually `type='Transfer'` (successfully linked,
+      correctly excluded from every real view — Drill-in, `GET /summary`) but still carry a
+      leftover, functionally-moot `category='Miscellaneous'` text value from before they were
+      linked (nothing clears `category` once a row becomes a Transfer, since it stops mattering for
+      any rollup either way). 68 raw − 18 stale-but-harmless = 50, matching what Rohan actually saw
+      in the UI. Not a functional bug — every view that matters already excludes these rows
+      correctly — but confirms the "68" figure I'd quoted earlier this session was the wrong
+      measurement to compare against the UI; `50` (Drill-in/Needs-Review-visible) is the number
+      that reflects the app's real behaviour, `68` (raw DB count) doesn't. **Minor, non-blocking
+      cleanup idea, not actioned**: `category` could be nulled (or left, it's harmless) on a row
+      once `type` becomes `Transfer`, purely so a raw DB inspection doesn't show a misleading value
+      — no user-facing effect either way.
+      Separately, Rohan flagged that many of the 7 unlinked `-$5,000 "... Trans salary MAYEKAR A"`
+      debits (all on the AC account, first surfaced two follow-ups ago) are confidently internal
+      transfers whose credit counterparts exist in accounts not yet uploaded. Confirmed technically:
+      `transfers/detection.py`'s own Tier-1 reference-token regex
+      (`_REFERENCE_TOKEN_RE = r"\b[A-Za-z]{1,3}\d{6,}\b"`) extracts a real reference number from
+      every one of these (e.g. `R7194058725`) — the same signal Tier-1 already uses to link a
+      confirmed pair — but no transaction anywhere in the currently-uploaded data has that same
+      reference number at the opposite amount, so no link is possible with the data on hand.
+      **TO-DO, explicitly deferred by Rohan rather than built now — revisit once a complete extract
+      from all accounts is available (i.e. once MAC/MACACC/NBA parsing exists, or more months of
+      JC/AC data close the gap)**: surface this specific case as its own `needs_review_reason`
+      (e.g. `possible_transfer_no_counterpart`) — reusing Tier-1's existing reference-token
+      extraction even on the "no match found" path, not new detection logic — so the Needs-Review
+      queue explains "this looks like a transfer, but no match was found" instead of the generic
+      `llm_unavailable` flag it shows today. Deliberately would **not** change `type` or
+      `total_expense` — only a confirmed, linked counterpart can safely be excluded from totals;
+      this is purely about the queue explaining itself more clearly for an interim, known data gap.
+      **Same day, eighth follow-up — a real find from cross-referencing historical data, not
+      another live-drive report**: Rohan asked whether `docs/AU COST - Manual categorisation.xlsx`
+      (Source 2, §4.2 — 14,349 real transactions, 2012-05-09 to 2025-06-07, the user's own 13-year
+      manual budget, already the designated source for J8) would add value if cross-referenced
+      against the current live state. Investigated by actually reading the file (`Expense Log`
+      sheet), not just recalling §4.2's summary: its `Description` column is free-text shorthand the
+      user typed himself ("Salary", "Transfer to Arvan", "ATO payment"), not raw bank text, and the
+      date ranges don't even overlap (log ends 2025-06-07, live data starts 2026-04) — so it can't
+      serve as a transaction-level cross-check. But it's valuable a different way: as 13 years of
+      Rohan's own real categorisation judgement, independent of any bank-provided or rule-derived
+      signal. Immediately paid off: searching it for "Arvan" (a family member) found **163
+      historical rows**, consistently tracked under a dedicated `Arvan_Fees` category (Pocketmoney/
+      School/Swimming/Cricket subcategories, shifting to "Transfer to Arvan" entries by 2024-2025 as
+      Arvan grew older) — the *same real person* behind 13 currently-live 2026 transactions
+      (`ARVAN MAYEKAR ... food`/`gym`/`trip`/`fees`), all sitting unrecognised in `Miscellaneous`
+      today. Rohan's call: fix it now. New seed rule: `ARVAN` → Kids & Family (subcategory
+      deliberately left unset — real 2026 spending purpose varies too much, food/gym/trip/fees, to
+      force one fixed subcategory the way the historical log's own more granular per-purpose
+      subcategories did; this project's current taxonomy has no exact equivalent for that
+      granularity). 1 new test (`test_arvan_family_transfers_match_to_kids_and_family`, 4 real
+      description variants). 205 tests passing. `/code-review medium` run against this diff —
+      **0 findings**.
+      **Verified live against CC/RC/AC (409 rows) — JC blocked mid-verification by an unrelated,
+      real data issue, not a code problem**: 12 of the 13 real Arvan rows confirmed
+      `Kids & Family`/`needs_review=False`; the 13th is on JC, which failed to re-upload with
+      `"Row 3: invalid amount ' '"` — cell B3 of `transaction-files/BankTransactions - JC.xlsx`
+      (the `ONLINE J6657692287 Trans salary MAYEKAR A` row, one of the two AC↔JC transfer legs
+      confirmed correctly linking multiple times earlier this same session) now contains a literal
+      whitespace character instead of `5000`. Not present in any earlier successful read today,
+      cause unknown (the `.xlsx` files under `transaction-files/` aren't git-tracked, so there's no
+      diff to inspect) — flagged to Rohan rather than silently worked around or "fixed" by the
+      assistant, since it's his real source data; possibly an accidental edit from the file being
+      open in Excel for an extended period this session (see the CC/RC/JC file-lock notes above).
+      **Not yet resolved as of this note.**
    6. **J6 — Portfolio/asset view**. `Asset` entity, `GET /assets` endpoints, Portfolio page.
+      **Scope note added 2026-09-25** (see the design-idea paragraph just above): the design pass
+      must also decide how/whether to link specific `Account`s to an `Asset` (or a loan-bearing
+      account to whatever represents a loan), so categorisation/reporting can key off account-level
+      context instead of purely per-transaction text patterns — not just the Asset entity in
+      isolation as originally scoped.
    7. **J7 — Tax refund (YoY)**. A filter on top of J2's summary endpoint + a chip on Overview.
    8. **J8 — Historical backfill**. Last, unchanged reasoning: needs the live pipeline proven on
       real imports first, and `backend/api.py` currently imports the discard-verdict

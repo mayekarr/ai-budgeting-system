@@ -34,14 +34,30 @@ col2.metric("Expense", f"${summary['total_expense']:,.2f}")
 col3.metric("Net", f"${summary['net']:,.2f}")
 
 by_category = summary["by_category"]
-if not by_category:
+by_income_category = summary["by_income_category"]
+
+if not by_category and not by_income_category:
     st.info("No transactions in the selected range.")
 else:
-    st.subheader("Spending by Category")
-    chart_df = pd.DataFrame(by_category).set_index("category")
-    st.bar_chart(chart_df["amount"], horizontal=True)
+    if by_category:
+        st.subheader("Spending by Category")
+        chart_df = pd.DataFrame(by_category).set_index("category")
+        st.bar_chart(chart_df["amount"], horizontal=True)
 
-    options = category_options([c["category"] for c in by_category])
+    if by_income_category:
+        # Every income row shares category=Income (see GET /summary's docstring), so subcategory
+        # -- Salary vs Dividends vs Tax Refund, ... -- is the meaningful breakdown for earnings,
+        # not category. A separate chart from Spending by Category since the two aren't the same
+        # grouping axis and mixing credits into a "net spend" chart would misread as spend.
+        st.subheader("Earnings by Source")
+        income_chart_df = pd.DataFrame(by_income_category).set_index("category")
+        st.bar_chart(income_chart_df["amount"], horizontal=True)
+
+    # "Income" is appended after the spend categories so the one selector/link below drills into
+    # earnings too (Rohan's request) — reusing the existing mechanism rather than a second,
+    # competing one that would race it for control of session_state["drill_in_category"]. Offered
+    # even with $0 income in range (Drill-in already handles an empty selection gracefully).
+    options = category_options([c["category"] for c in by_category] + ["Income"])
     selected_category = st.selectbox(
         "Drill into a category", options, key="overview_selected_category"
     )

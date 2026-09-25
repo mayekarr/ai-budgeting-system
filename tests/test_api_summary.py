@@ -107,6 +107,32 @@ def test_summary_ato_tax_refund_counts_as_income_not_netted(client):
     assert all(c["category"] != "Income" for c in body["by_category"])
 
 
+def test_summary_includes_earnings_breakdown_by_subcategory(client):
+    # Rohan's request: "there should also be a drill down for earnings" -- Overview's spend chart
+    # deliberately excludes Income (it's a different grouping axis: every income row shares
+    # category=Income, so subcategory -- Salary vs Dividends vs Tax Refund -- is the meaningful
+    # breakdown, not category). This backs the new "Earnings by Source" chart.
+    api_client, SessionLocal, account_id = client
+    _seed(SessionLocal, account_id, category="Income", subcategory="Salary", amount=5000.0, type="Income")
+    _seed(SessionLocal, account_id, category="Income", subcategory="Salary", amount=300.0, type="Income")
+    _seed(SessionLocal, account_id, category="Income", subcategory="Dividends & Distributions", amount=200.0, type="Income")
+    _seed(SessionLocal, account_id, category="Income", subcategory=None, amount=50.0, type="Income")
+    _seed(SessionLocal, account_id, category="Groceries", amount=-100.0, type="Expense")
+    # Excluded, same as the rest of the summary: a Transfer between the user's own accounts.
+    _seed(SessionLocal, account_id, category=None, amount=500.0, type="Transfer")
+
+    body = api_client.get("/summary").json()
+
+    by_income = {row["category"]: row["amount"] for row in body["by_income_category"]}
+    assert by_income == {"Salary": 5300.0, "Dividends & Distributions": 200.0, "Uncategorized": 50.0}
+    # Sorted descending by amount, same convention as by_category.
+    assert [row["category"] for row in body["by_income_category"]] == [
+        "Salary", "Dividends & Distributions", "Uncategorized",
+    ]
+    # Expense/Transfer rows must not leak into the earnings breakdown.
+    assert "Groceries" not in by_income
+
+
 def test_summary_filters_by_date_range(client):
     api_client, SessionLocal, account_id = client
     _seed(SessionLocal, account_id, date=date(2026, 7, 15), category="Groceries", amount=-100.0)

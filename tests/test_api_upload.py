@@ -200,6 +200,122 @@ def test_ato_override_is_not_overwritten_by_a_coincidental_transfer_match(tmp_pa
         assert ato_row["transfer_group_id"] is None
 
 
+def test_upload_succeeds_without_configured_llm_credentials(tmp_path, monkeypatch):
+    # No ANTHROPIC_API_KEY and no mocked client -- the real state before a key is ever set up (or
+    # if it's deliberately never purchased). An unmatched-merchant row must be flagged for review,
+    # not crash the whole upload the way an unhandled SDK auth error previously did.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    db_path = tmp_path / "test_finance.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    TestSessionLocal = sessionmaker(bind=engine)
+    monkeypatch.setattr(api_module, "engine", engine)
+    monkeypatch.setattr(api_module, "SessionLocal", TestSessionLocal)
+    Base.metadata.create_all(bind=engine)
+    with TestSessionLocal() as seed_session:
+        seed_rules_if_empty(seed_session)
+        # Pre-register the account so resolved.needs_review is False -- isolates the thing this
+        # test actually checks (the LLM-unavailable categorisation flag) from account resolution.
+        account = Account(name="CC", institution="NAB", owner="Rohan", account_type="Credit Card")
+        seed_session.add(account)
+        seed_session.flush()
+        seed_session.add(AccountAlias(account_id=account.id, raw_identifier="Card ending 2957"))
+        seed_session.commit()
+
+    no_key_client = TestClient(api_module.app)
+    csv = ("Date,Amount,Account Number,Transaction Type,Transaction Details,Balance,Category,Merchant Name,Processed On\n"
+           "2026-08-01,-12.34,Card ending 2957,CREDIT CARD PURCHASE,SOME UNKNOWN MERCHANT XYZ,-100.00,,,\n")
+    response = _upload(no_key_client, csv)
+
+    assert response.status_code == 201
+    assert response.json()["needs_review_count"] == 1
+
+    listed = no_key_client.get("/transactions").json()
+    row = listed[0]
+    assert row["category"] == "Miscellaneous"
+    assert row["needs_review"] is True
+    # Distinct from a genuine low-confidence model judgement -- every future upload hits the same
+    # wall while no key is configured, which is worth being able to tell apart in the queue.
+    assert row["needs_review_reason"] == "llm_unavailable"
+
+
+def test_upload_derives_category_from_bank_category_when_no_rule_matches(tmp_path, monkeypatch):
+    # Real, quantified gap found live by Rohan: 409/422 real rows across CC/RC/AC/JC carry a
+    # non-blank bank Category, and it was being parsed then discarded -- Rohan's explicit
+    # instruction was to use it instead of hand-writing more one-off text rules. No
+    # ANTHROPIC_API_KEY / mocked client here: this must resolve via the bank-category layer alone,
+    # never reaching the (permanently unavailable) LLM fallback.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    db_path = tmp_path / "test_finance.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    TestSessionLocal = sessionmaker(bind=engine)
+    monkeypatch.setattr(api_module, "engine", engine)
+    monkeypatch.setattr(api_module, "SessionLocal", TestSessionLocal)
+    Base.metadata.create_all(bind=engine)
+    with TestSessionLocal() as seed_session:
+        seed_rules_if_empty(seed_session)
+        account = Account(name="CC", institution="NAB", owner="Rohan", account_type="Credit Card")
+        seed_session.add(account)
+        seed_session.flush()
+        seed_session.add(AccountAlias(account_id=account.id, raw_identifier="Card ending 2957"))
+        seed_session.commit()
+
+    no_key_client = TestClient(api_module.app)
+    csv = (
+        "Date,Amount,Account Number,Transaction Type,Transaction Details,Balance,Category,Merchant Name,Processed On\n"
+        "2026-08-01,-62.00,Card ending 2957,PURCHASE AUTHORISATION,SOME BRAND NEW GYM STUDIO XYZ,-100.00,"
+        "Gym & fitness,Some Brand New Gym Studio,\n"
+    )
+    response = _upload(no_key_client, csv)
+
+    assert response.status_code == 201
+    assert response.json()["needs_review_count"] == 0  # resolved, not flagged
+
+    row = no_key_client.get("/transactions").json()[0]
+    assert row["category"] == "Health & Medical"
+    assert row["subcategory"] == "Gym & Fitness"
+    assert row["needs_review"] is False
+    # Merchant Name is captured too (a separate, real gap -- it was parsed then discarded).
+    assert row["merchant"] == "Some Brand New Gym Studio"
+
+
+def test_upload_categorises_a_real_salary_credit_as_income_without_llm(tmp_path, monkeypatch):
+    # The actual defect Rohan reported live: GET /summary's total_income showed $0 despite real
+    # salary rows in the uploaded data, because no seed rule recognised salary/dividend text and
+    # the LLM fallback is permanently unavailable (docs/product-requirements.md §4.3.1) -- so every
+    # real income row silently landed in Miscellaneous. No ANTHROPIC_API_KEY / mocked client here,
+    # matching that real environment: this must work off rule-matching alone.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    db_path = tmp_path / "test_finance.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    TestSessionLocal = sessionmaker(bind=engine)
+    monkeypatch.setattr(api_module, "engine", engine)
+    monkeypatch.setattr(api_module, "SessionLocal", TestSessionLocal)
+    Base.metadata.create_all(bind=engine)
+    with TestSessionLocal() as seed_session:
+        seed_rules_if_empty(seed_session)
+        account = Account(name="JC", institution="NAB", owner="Rohan", account_type="Everyday")
+        seed_session.add(account)
+        seed_session.flush()
+        seed_session.add(AccountAlias(account_id=account.id, raw_identifier="147912573"))
+        seed_session.commit()
+
+    no_key_client = TestClient(api_module.app)
+    csv = ("Date,Amount,Account Number,Transaction Type,Transaction Details,Balance,Category,Merchant Name,Processed On\n"
+           "2026-08-01,5317.55,147912573,DIRECT CREDIT,SALARY/WAGES ANILA MAYEKAR,-100.00,,,\n")
+    response = _upload(no_key_client, csv)
+
+    assert response.status_code == 201
+    assert response.json()["needs_review_count"] == 0  # confident rule match, no review needed
+
+    row = no_key_client.get("/transactions").json()[0]
+    assert row["category"] == "Income"
+    assert row["subcategory"] == "Salary"
+    assert row["needs_review"] is False
+
+    summary = no_key_client.get("/summary").json()
+    assert summary["total_income"] == 5317.55
+
+
 def test_persistence_failure_returns_controlled_500_not_unhandled_exception(client, monkeypatch):
     def _boom(*args, **kwargs):
         raise RuntimeError("simulated DB failure")

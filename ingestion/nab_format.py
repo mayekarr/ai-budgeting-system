@@ -7,9 +7,13 @@ and AC accounts:
     Date, Amount, Account Number, Transaction Type, Transaction Details, Balance,
     Category, Merchant Name, Processed On
 
-`Category`/`Merchant Name` are the bank's own values — read for reference only, never trusted as
-the classification output (§4.1's own finding: demonstrably unreliable for transfer/category
-purposes). The real classification comes from categorisation/rules.py + claude_fallback.py.
+`Category`/`Merchant Name` are the bank's own values. `Category` is read as a refund-detection
+signal (transfers/refunds.py) and, since 2026-09-25, as a categorisation signal too — via a small
+curated mapping (categorisation/bank_category.py) that deliberately excludes the transfer/refund-
+labelled values §4.1 found unreliable *for that narrower purpose* (a real invoice mislabelled
+"Transfers out"), so that finding isn't reintroduced. `Merchant Name` is stored on
+`Transaction.merchant` for display. Classification itself is still decided by
+categorisation/rules.py first, this bank-category mapping second, then claude_fallback.py last.
 """
 
 import io
@@ -34,10 +38,19 @@ class ParsedRow:
     raw_transaction_type: str
     raw_description: str
     balance: Optional[float]
-    # The bank's own "Category" column, if present — read only as a refund/transfer *detection
-    # signal* (transfers/refunds.py, transfers/detection.py), never as the transaction's actual
-    # category. §4.1 found bank-assigned categories demonstrably unreliable for classification.
+    # The bank's own "Category" column, if present — read as a refund-detection signal
+    # (transfers/refunds.py) and, via a small curated mapping (categorisation/bank_category.py),
+    # as a categorisation signal too. §4.1 found bank-assigned categories demonstrably unreliable
+    # specifically as a *transfer/refund type* signal (e.g. a real invoice labelled "Transfers
+    # out") -- that finding doesn't mean the value is meaningless for general spend/income
+    # categorisation, which is a different question; the mapping deliberately excludes exactly the
+    # transfer/refund-labelled values §4.1 is about.
     raw_bank_category: Optional[str] = None
+    # The bank's own "Merchant Name" column, if present -- stored on Transaction.merchant for
+    # display only (/code-review finding: an earlier version of this comment wrongly claimed it
+    # was also consulted by categorisation/bank_category.py -- categorise_from_bank_category() only
+    # ever reads raw_bank_category, never this field).
+    raw_merchant: Optional[str] = None
 
 
 def _read_dataframe(raw_bytes: bytes, filename: str) -> pd.DataFrame:
@@ -100,6 +113,11 @@ def parse_nab_format(raw_bytes: bytes, *, filename: str) -> list[ParsedRow]:
             cat_val = raw[lower_cols["category"]]
             raw_bank_category = None if pd.isna(cat_val) else str(cat_val).strip()
 
+        raw_merchant = None
+        if "merchant name" in lower_cols:
+            merchant_val = raw[lower_cols["merchant name"]]
+            raw_merchant = None if pd.isna(merchant_val) else str(merchant_val).strip()
+
         rows.append(
             ParsedRow(
                 date=parsed_date,
@@ -109,6 +127,7 @@ def parse_nab_format(raw_bytes: bytes, *, filename: str) -> list[ParsedRow]:
                 raw_description=raw_description,
                 balance=balance,
                 raw_bank_category=raw_bank_category,
+                raw_merchant=raw_merchant,
             )
         )
 

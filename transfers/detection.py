@@ -112,6 +112,25 @@ def link_transfer_pair(
     `type=Transfer` on both. Public — also used directly by backend/api.py's manual
     confirm_transfer_with_id action (/code-review finding: that handler used to hand-roll this
     same logic, risking silent drift from this module's own group-reuse behaviour).
+
+    Also clears a pre-existing needs_review flag that this link makes moot — reported live by
+    Rohan on the real AC/JC "Trans salary" pair, whose upload-time llm_unavailable flag (set by
+    categorisation, which runs before transfer detection in the upload pipeline) survived a
+    confident Tier-1 link forever, even though docs/design-logic-and-ux.md §2.3 says a confident
+    match "auto-links with no review" and category/refund status stop mattering once a row is
+    genuinely a Transfer (GET /summary excludes Transfer rows outright either way).
+    unrecognised_account is never cleared here, consistent with should_supersede's use everywhere
+    else in this codebase: it's about the account's identity, not this transaction's classification.
+
+    CORRECTNESS NOTE (/code-review finding — an earlier version of this docstring wrongly claimed
+    Tier-2 Medium never reaches this function): `_process_tier2`'s Medium band *does* call this
+    function too, immediately followed by `_flag_transfer_match(..., type_changed=True)`, which
+    re-flags `needs_review=True`/`reason=TRANSFER_MATCH` right back — so a Medium match's final
+    state is still correctly flagged for its soft confirmation, but only because that second call
+    always runs straight after this one. This function does not itself know a Medium-band caller
+    is about to re-flag it. Do not reorder or separate those two calls in `_process_tier2` without
+    re-verifying this — doing so would silently leave a Medium match unflagged, invisible to the
+    Needs-Review queue, violating design-logic-and-ux.md §2.3.
     """
     group = counterpart.transfer_group or tx.transfer_group
     if group is None:
@@ -123,6 +142,12 @@ def link_transfer_pair(
     counterpart.transfer_group = group
     tx.type = "Transfer"
     counterpart.type = "Transfer"
+
+    for member in (tx, counterpart):
+        if member.needs_review_reason is None or should_supersede(member.needs_review_reason, TRANSFER_MATCH):
+            member.needs_review = False
+            member.needs_review_reason = None
+
     session.commit()
 
 

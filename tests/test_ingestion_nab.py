@@ -28,11 +28,21 @@ def test_parses_real_shape_rows():
     assert first.balance == -4131.90
 
 
-def test_bank_provided_category_is_not_trusted_as_the_category():
-    # §4.1: bank-assigned Category is read but must never be used as the classification output —
-    # it's demonstrably unreliable (e.g. real invoices mislabeled "Transfers out").
+def test_bank_provided_category_is_read_separately_not_as_the_category_field():
+    # §4.1: bank-assigned Category is demonstrably unreliable as a *transfer/refund type* signal
+    # (e.g. real invoices mislabeled "Transfers out") -- it's kept on its own field
+    # (raw_bank_category), read separately from the actual classification output, never assigned
+    # directly to ParsedRow.category (there is no such field). categorisation/bank_category.py
+    # (2026-09-25) does use it as a categorisation *signal*, via a small curated mapping that
+    # deliberately excludes exactly the transfer/refund-labelled values this finding is about.
     rows = parse_nab_format(SAMPLE_CSV.encode(), filename="statement.csv")
     assert not hasattr(rows[0], "category")
+
+
+def test_merchant_name_is_captured():
+    rows = parse_nab_format(SAMPLE_CSV.encode(), filename="statement.csv")
+    assert rows[0].raw_merchant == "Hills Meats"
+    assert rows[1].raw_merchant is None  # blank cell in the sample
 
 
 def test_missing_required_column_raises_nab_format_error():

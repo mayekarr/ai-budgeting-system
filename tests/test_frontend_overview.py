@@ -21,6 +21,9 @@ def _fake_summary(*args, **kwargs):
             {"category": "Transport", "amount": 100.0},
             {"category": "Groceries", "amount": 80.0},
         ],
+        "by_income_category": [
+            {"category": "Salary", "amount": 5000.0},
+        ],
     }
 
 
@@ -80,7 +83,49 @@ def test_category_dropdown_offers_all_categories_option():
 
     assert not at.exception
     options = at.selectbox(key="overview_selected_category").options
-    assert options == [ALL_CATEGORIES, "Transport", "Groceries"]
+    # "Income" is appended after the spend categories -- there's a drill down for earnings too
+    # (Rohan's request), reusing this same selector/link rather than a second, competing one.
+    assert options == [ALL_CATEGORIES, "Transport", "Groceries", "Income"]
+
+
+def test_selecting_income_stores_it_for_drill_in():
+    with patch("frontend.api_client.get_summary", side_effect=_fake_summary):
+        at = _open_overview()
+        at.run()
+        at.selectbox(key="overview_selected_category").select("Income").run()
+
+    assert not at.exception
+    assert at.session_state["drill_in_category"] == "Income"
+
+
+def test_overview_shows_earnings_by_source_chart():
+    with patch("frontend.api_client.get_summary", side_effect=_fake_summary):
+        at = _open_overview()
+        at.run()
+
+    assert not at.exception
+    assert any("Earnings by Source" in h.value for h in at.subheader)
+
+
+def test_overview_hides_earnings_chart_when_no_income_in_range():
+    def _no_income_summary(*args, **kwargs):
+        return {
+            "date_from": None, "date_to": None,
+            "total_income": 0.0, "total_expense": 80.0, "net": -80.0,
+            "by_category": [{"category": "Groceries", "amount": 80.0}],
+            "by_income_category": [],
+        }
+
+    with patch("frontend.api_client.get_summary", side_effect=_no_income_summary):
+        at = _open_overview()
+        at.run()
+
+    assert not at.exception
+    assert not any("Earnings by Source" in h.value for h in at.subheader)
+    # Income must still be offered as a drill-in target even with $0 in range -- Drill-in already
+    # handles an empty selection gracefully ("No transactions found"), same as any other category.
+    options = at.selectbox(key="overview_selected_category").options
+    assert "Income" in options
 
 
 def test_selecting_all_categories_stores_the_sentinel_for_drill_in():
@@ -99,6 +144,7 @@ def test_overview_shows_info_when_no_transactions_in_range():
             "date_from": None, "date_to": None,
             "total_income": 0.0, "total_expense": 0.0, "net": 0.0,
             "by_category": [],
+            "by_income_category": [],
         }
 
     with patch("frontend.api_client.get_summary", side_effect=_empty_summary):

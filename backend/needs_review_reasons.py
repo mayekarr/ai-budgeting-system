@@ -11,12 +11,20 @@ UNRECOGNISED_ACCOUNT = "unrecognised_account"
 REFUND_AMBIGUITY = "refund_ambiguity"
 TRANSFER_MATCH = "transfer_match"
 
+# The Claude API call itself failed (no api_key/auth_token/credentials configured, auth rejected,
+# network/rate limit/outage) rather than returning a genuinely low-confidence result -- distinct
+# from LOW_CONFIDENCE_CATEGORY because it means every future upload will hit the same wall until
+# fixed, not just this one merchant (2026-09-25, categorisation/claude_fallback.py). Addressed by
+# the same action as LOW_CONFIDENCE_CATEGORY -- a manual category correction.
+LLM_UNAVAILABLE = "llm_unavailable"
+
 # J8 (historical backfill) will use this for the 4 explicitly-flagged remap items
 # (docs/product-requirements.md §4.2.1) — not produced by any code yet.
 BACKFILL_FLAGGED = "backfill_flagged"
 
 ALL_REASONS = (
     LOW_CONFIDENCE_CATEGORY,
+    LLM_UNAVAILABLE,
     UNRECOGNISED_ACCOUNT,
     REFUND_AMBIGUITY,
     TRANSFER_MATCH,
@@ -32,10 +40,14 @@ ALL_REASONS = (
 # unrecognised_account ranks highest and is never superseded: it's about the account's identity,
 # not this transaction's classification, and (per ingestion/account_resolution.py) is only ever
 # raised once per account, so losing it would mean losing it for good. transfer_match ranks above
-# low_confidence_category/refund_ambiguity, which are moot once a transaction is genuinely
-# reclassified as a Transfer (GET /summary excludes Transfer rows outright either way).
+# low_confidence_category/llm_unavailable/refund_ambiguity, which are moot once a transaction is
+# genuinely reclassified as a Transfer (GET /summary excludes Transfer rows outright either way).
+# low_confidence_category and llm_unavailable are the same precedence tier -- a single
+# categorisation attempt only ever produces one or the other, never both, so their relative order
+# doesn't matter.
 _PRECEDENCE_ORDER = (
     LOW_CONFIDENCE_CATEGORY,
+    LLM_UNAVAILABLE,
     REFUND_AMBIGUITY,
     TRANSFER_MATCH,
     UNRECOGNISED_ACCOUNT,

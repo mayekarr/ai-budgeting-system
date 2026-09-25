@@ -97,6 +97,20 @@ def test_patch_category_correction_preserves_an_unrelated_needs_review_reason(cl
     assert body["needs_review_reason"] == UNRECOGNISED_ACCOUNT
 
 
+def test_patch_category_correction_clears_llm_unavailable_reason(client):
+    # llm_unavailable (no ANTHROPIC_API_KEY configured) is addressed by the same action as
+    # low_confidence_category -- a manual category correction -- so it must clear the same way.
+    from backend.needs_review_reasons import LLM_UNAVAILABLE
+
+    api_client, SessionLocal, account_id = client
+    tx_id = _seed(SessionLocal, account_id, needs_review=True, needs_review_reason=LLM_UNAVAILABLE)
+
+    body = api_client.patch(f"/transactions/{tx_id}", json={"category": "Groceries"}).json()
+
+    assert body["needs_review"] is False
+    assert body["needs_review_reason"] is None
+
+
 def test_patch_without_subcategory_clears_it(client):
     api_client, SessionLocal, account_id = client
     tx_id = _seed(SessionLocal, account_id, category="Groceries", subcategory=None)

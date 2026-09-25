@@ -84,6 +84,61 @@ def test_ac_jc_transfer_pair_links_via_shared_reference_number(session):
     assert tx_ac.type == "Transfer"
 
 
+def test_tier1_link_clears_a_moot_pre_existing_review_reason(session):
+    # Real gap reported live by Rohan, seen on the actual AC/JC "Trans salary" pair: the upload
+    # pipeline runs categorisation before transfer detection, so a row can already carry
+    # needs_review=True/llm_unavailable (or low_confidence_category) by the time this Tier-1 match
+    # runs -- link_transfer_pair only ever set type=Transfer and never touched needs_review at all,
+    # so a confidently-linked Transfer kept displaying its stale pre-link category/reason forever,
+    # even though docs/design-logic-and-ux.md §2.3 says a confident match "auto-links with no
+    # review" and category is moot on a Transfer row either way (GET /summary excludes it outright).
+    ac = _account_with_alias(session, "AC", "147912186")
+    jc = _account_with_alias(session, "JC", "147912573")
+
+    tx_ac = _tx(session, ac, date(2026, 8, 13), -5000.00,
+                "ONLINE J6657692287 Trans salary MAYEKAR A", "TRANSFER DEBIT")
+    tx_jc = _tx(session, jc, date(2026, 8, 13), 5000.00,
+                "ONLINE J6657692287 Trans salary MAYEKAR A", "TRANSFER CREDIT")
+    for tx in (tx_ac, tx_jc):
+        tx.needs_review = True
+        tx.needs_review_reason = LOW_CONFIDENCE_CATEGORY
+    session.commit()
+
+    process_transfer_detection(session, tx_ac)
+    process_transfer_detection(session, tx_jc)
+
+    session.refresh(tx_ac)
+    session.refresh(tx_jc)
+    assert tx_ac.type == "Transfer"
+    assert tx_ac.needs_review is False
+    assert tx_ac.needs_review_reason is None
+    assert tx_jc.needs_review is False
+    assert tx_jc.needs_review_reason is None
+
+
+def test_tier1_link_never_clears_unrecognised_account(session):
+    # unrecognised_account is about the account's identity, not this transaction's classification
+    # -- never superseded anywhere else in this codebase, and a Tier-1 link must be consistent.
+    ac = _account_with_alias(session, "AC", "147912186")
+    jc = _account_with_alias(session, "JC", "147912573")
+
+    tx_ac = _tx(session, ac, date(2026, 8, 13), -5000.00,
+                "ONLINE J6657692287 Trans salary MAYEKAR A", "TRANSFER DEBIT")
+    tx_jc = _tx(session, jc, date(2026, 8, 13), 5000.00,
+                "ONLINE J6657692287 Trans salary MAYEKAR A", "TRANSFER CREDIT")
+    tx_ac.needs_review = True
+    tx_ac.needs_review_reason = UNRECOGNISED_ACCOUNT
+    session.commit()
+
+    process_transfer_detection(session, tx_ac)
+    process_transfer_detection(session, tx_jc)
+
+    session.refresh(tx_ac)
+    assert tx_ac.type == "Transfer"  # the link itself still happens
+    assert tx_ac.needs_review is True
+    assert tx_ac.needs_review_reason == UNRECOGNISED_ACCOUNT
+
+
 def test_nba_rc_transfer_pair_links_via_name_text_alias_not_a_number(session):
     nba = _account_with_alias(session, "NBA", "ROHAN MAYEKAR")
     rc = _account_with_alias(session, "RC", "133500607")
@@ -240,6 +295,30 @@ def test_tier2_exact_amount_same_day_auto_links_high_confidence_no_review(sessio
     # High confidence — no review needed, matching §2.3's table.
     assert tx_a.needs_review is False
     assert tx_b.needs_review is False
+
+
+def test_tier2_high_band_clears_a_moot_pre_existing_review_reason(session):
+    # Same gap as Tier-1's own test above, for the other High-band code path (link_transfer_pair
+    # is shared by both) -- a pre-existing stale flag must be cleared here too, not just left at
+    # its default False, which the test above alone can't distinguish from the bug being present.
+    a = _account(session, "A")
+    b = _account(session, "B")
+    tx_a = _tx(session, a, date(2026, 8, 5), -100.00, "Unlabelled transfer out")
+    tx_b = _tx(session, b, date(2026, 8, 5), 100.00, "Unlabelled transfer in")
+    for tx in (tx_a, tx_b):
+        tx.needs_review = True
+        tx.needs_review_reason = LOW_CONFIDENCE_CATEGORY
+    session.commit()
+
+    process_transfer_detection(session, tx_a)
+    process_transfer_detection(session, tx_b)
+
+    session.refresh(tx_a)
+    session.refresh(tx_b)
+    assert tx_a.needs_review is False
+    assert tx_a.needs_review_reason is None
+    assert tx_b.needs_review is False
+    assert tx_b.needs_review_reason is None
 
 
 def test_tier2_exact_amount_within_window_auto_links_medium_confidence_flagged(session):

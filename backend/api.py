@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from categorisation.bank_category import categorise_from_bank_category
 from categorisation.claude_fallback import categorise_with_fallback
 from categorisation.rules import match_rule
 from categorisation.seed_rules import seed_rules_if_empty
@@ -24,6 +25,7 @@ from transfers.refunds import detect_refund
 from .database import SessionLocal, bulk_save_transactions, create_tables, engine  # noqa: F401  (engine kept for test monkeypatching)
 from .models import CategorisationRule, Transaction
 from .needs_review_reasons import (
+    LLM_UNAVAILABLE,
     LOW_CONFIDENCE_CATEGORY,
     REFUND_AMBIGUITY,
     TRANSFER_MATCH,
@@ -120,6 +122,10 @@ class SummaryOut(BaseModel):
     total_expense: float
     net: float
     by_category: List[CategorySummary]
+    # Every income row shares category=Income (by design — see get_summary's docstring), so
+    # subcategory (Salary vs Dividends vs Tax Refund, ...) is the meaningful breakdown axis for
+    # earnings, not category. Backs Overview's "Earnings by Source" chart.
+    by_income_category: List[CategorySummary]
 
 
 def get_session() -> Generator[Session, None, None]:
@@ -158,14 +164,23 @@ async def upload_transactions(
         resolved = resolve_account(db, row.account_identifier)
 
         rule_match = match_rule(db, row.raw_description)
+        bank_derived = None if rule_match is not None else categorise_from_bank_category(row.raw_bank_category)
         if rule_match is not None:
-            category, subcategory, confidence, cat_needs_review = (
-                rule_match.category, rule_match.subcategory, rule_match.confidence, False,
+            category, subcategory, confidence, cat_needs_review, cat_review_reason = (
+                rule_match.category, rule_match.subcategory, rule_match.confidence, False, None,
             )
+        elif bank_derived is not None:
+            # A rule (including a user correction) always wins when one exists; this is a second,
+            # more general line of defence for whatever no rule covers yet, using the bank's own
+            # Category field (categorisation/bank_category.py) instead of falling straight through
+            # to the LLM fallback (permanently unavailable for this user, §4.3.1).
+            category, subcategory = bank_derived
+            confidence, cat_needs_review, cat_review_reason = 1.0, False, None
         else:
             fallback = categorise_with_fallback(db, row.raw_description)
-            category, subcategory, confidence, cat_needs_review = (
+            category, subcategory, confidence, cat_needs_review, cat_review_reason = (
                 fallback.category, fallback.subcategory, fallback.confidence, fallback.needs_review,
+                fallback.reason,
             )
 
         refund_decision = detect_refund(
@@ -192,7 +207,7 @@ async def upload_transactions(
         needs_review_reason = highest_priority_reason(
             UNRECOGNISED_ACCOUNT if resolved.needs_review else None,
             REFUND_AMBIGUITY if refund_decision.needs_review else None,
-            LOW_CONFIDENCE_CATEGORY if cat_needs_review else None,
+            (cat_review_reason or LOW_CONFIDENCE_CATEGORY) if cat_needs_review else None,
         )
 
         to_persist.append(
@@ -201,7 +216,7 @@ async def upload_transactions(
                 "date": row.date,
                 "amount": row.amount,
                 "raw_description": row.raw_description,
-                "merchant": None,
+                "merchant": row.raw_merchant,
                 "category": category,
                 "subcategory": subcategory,
                 "type": tx_type,
@@ -360,15 +375,15 @@ def correct_transaction(
     return tx
 
 
-def _resolve_review_flag(tx: Transaction, addressed_reason: str) -> None:
+def _resolve_review_flag(tx: Transaction, *addressed_reasons: str) -> None:
     """
-    Clears needs_review only when the transaction's actual stored reason is the one this action
+    Clears needs_review only when the transaction's actual stored reason is one this action
     addresses (or already None) — an unrelated, still-live reason (e.g. unrecognised_account on a
     row a user happens to correct the category of via Category Drill-in, which isn't reason-gated
     the way Needs-Review is) must survive (/code-review finding — the same bug class the transfer
     confirm/reject actions were fixed for, missed here since this path predates that fix).
     """
-    if tx.needs_review_reason in (addressed_reason, None):
+    if tx.needs_review_reason is None or tx.needs_review_reason in addressed_reasons:
         tx.needs_review = False
         tx.needs_review_reason = None
 
@@ -388,7 +403,7 @@ def _apply_category_correction(db: Session, tx: Transaction, category: str, subc
 
     tx.category = category
     tx.subcategory = subcategory
-    _resolve_review_flag(tx, LOW_CONFIDENCE_CATEGORY)
+    _resolve_review_flag(tx, LOW_CONFIDENCE_CATEGORY, LLM_UNAVAILABLE)
     tx.confidence_score = 1.0
 
     # Case-insensitive, trimmed comparison — matches categorisation/rules.py's own exact-match
@@ -551,9 +566,12 @@ def get_summary(
 
     total_income = 0.0
     category_raw_totals: dict[str, float] = {}
+    income_raw_totals: dict[str, float] = {}
     for tx in q.all():
         if tx.category == "Income":
             total_income += tx.amount
+            income_label = tx.subcategory or "Uncategorized"
+            income_raw_totals[income_label] = income_raw_totals.get(income_label, 0.0) + tx.amount
             continue
         label = tx.category or "Uncategorized"
         category_raw_totals[label] = category_raw_totals.get(label, 0.0) + tx.amount
@@ -567,6 +585,13 @@ def get_summary(
     )
     total_expense = sum(c.amount for c in by_category)
 
+    # Income amounts are already positive (credits) — no sign flip needed, unlike by_category.
+    by_income_category = sorted(
+        (CategorySummary(category=c, amount=raw) for c, raw in income_raw_totals.items()),
+        key=lambda c: c.amount,
+        reverse=True,
+    )
+
     return SummaryOut(
         date_from=date_from,
         date_to=date_to,
@@ -574,4 +599,5 @@ def get_summary(
         total_expense=total_expense,
         net=total_income - total_expense,
         by_category=by_category,
+        by_income_category=by_income_category,
     )

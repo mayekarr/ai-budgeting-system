@@ -3,6 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from backend.needs_review_reasons import (
+    LLM_UNAVAILABLE,
     LOW_CONFIDENCE_CATEGORY,
     REFUND_AMBIGUITY,
     TRANSFER_MATCH,
@@ -28,6 +29,7 @@ st.title("Needs Review")
 # across separate pages.
 REASON_LABELS = {
     LOW_CONFIDENCE_CATEGORY: "Low-confidence category",
+    LLM_UNAVAILABLE: "LLM unavailable (no API key)",
     UNRECOGNISED_ACCOUNT: "Unrecognised account",
     REFUND_AMBIGUITY: "Refund ambiguity",
     TRANSFER_MATCH: "Transfer match",
@@ -192,7 +194,9 @@ for tx in filtered:
             _render_transfer_match(tx)
         elif reason == REFUND_AMBIGUITY:
             _render_refund_ambiguity(tx)
-        elif reason == LOW_CONFIDENCE_CATEGORY:
+        elif reason in (LOW_CONFIDENCE_CATEGORY, LLM_UNAVAILABLE):
+            # llm_unavailable is resolved the same way as a genuine low-confidence result -- a
+            # manual category correction -- not the unrecognised_account "visibility only" path.
             _render_low_confidence_category(tx)
         else:
             # unrecognised_account (and any future backfill_flagged rows, J8): surfaced for

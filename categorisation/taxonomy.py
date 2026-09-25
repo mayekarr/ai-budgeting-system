@@ -6,15 +6,20 @@ The finalized 16-category merged taxonomy (docs/product-requirements.md §4.2).
 `Refund` and `Investment` are deliberately absent: refunds are an `is_refund` attribute on a
 Transaction (except the ATO tax-refund exception, which lives under Income), and investments are
 modeled as a separate Asset entity, not a spend category.
+
+Income's `Rental Income` and Car's `Charging` subcategories added 2026-09-25 (Rohan's call,
+docs/next-steps.md) after a real investment-property rent credit and a real EV-charging debit each
+had nowhere to go but a generic catch-all — the only additions made to this taxonomy since it was
+finalized 2026-08-18.
 """
 
 TAXONOMY: dict[str, list[str]] = {
-    "Income": ["Salary", "Interest", "Dividends & Distributions", "Tax Refund", "Government Rebate", "Other"],
+    "Income": ["Salary", "Interest", "Dividends & Distributions", "Rental Income", "Tax Refund", "Government Rebate", "Other"],
     "Housing": ["Rent", "Mortgage EMI", "Home Insurance", "Utility Bills", "Maintenance/Content"],
     "Groceries": [],
     "Cafes & Restaurants": ["Restaurants & Takeaway", "Cafes & Coffee"],
     "Transport": ["Public Transport", "Taxis & Rideshare", "Parking & Tolls"],
-    "Car": ["EMI", "Insurance", "Petrol", "Registration", "Other"],
+    "Car": ["EMI", "Insurance", "Petrol", "Charging", "Registration", "Other"],
     "Travel & Holidays": ["Flights", "Accommodation", "Attractions & Events", "Other"],
     "Shopping": ["Clothes", "Electronics & Technology", "Homeware", "Other"],
     "Health & Medical": ["Medical", "Gym & Fitness"],
