@@ -35,17 +35,31 @@ index. Performance items P1–P5 come from a measured review on 2026-09-25 (Roha
 feeling slow) — kept in their recommended relative order, interleaved with the journey work by when
 each one actually matters.
 
-1. **P1 — Reuse one HTTP client in the dashboard** (`frontend/api_client.py`). Root cause of the
-   slowness: every `httpx.get(...)`/`httpx.patch(...)` call builds a brand-new client, which costs
-   ~202ms on this machine — measured ~233ms per request vs ~9ms with a reused client (25×). Needs
-   Review fires 10 requests per rerun (~2.3s per click today → ~0.1s after). Small, low-risk
-   change; existing tests mock at the function level, so they're unaffected. Backend read endpoints
-   themselves are fine (~10ms) and DB indexes are already in place.
-2. **P2 — Cache dashboard reads** with `st.cache_data`, cleared after every correction/confirm/
-   reject (all writes already go through `api_client.py`, so there's one place to clear it).
-   Streamlit reruns the whole page on every widget click and nothing is cached today, so unchanged
-   data is refetched on every interaction. Tradeoff: stale data if a write path ever forgets to
-   clear the cache.
+1. ~~**P1 — Reuse one HTTP client in the dashboard**~~ — **Done** 2026-09-25. Root cause of the
+   slowness: every `httpx.get(...)`/`httpx.patch(...)` call built a brand-new client, costing
+   ~202ms on this machine (~233ms per request vs ~9ms reused). `frontend/api_client.py` now holds
+   one `httpx.Client` per process (`functools.cache`; `httpx.Client` is thread-safe, and Streamlit
+   serves each session from its own thread). Backend read endpoints were never the problem (~10ms,
+   DB indexes already in place).
+2. ~~**P2 — Cache dashboard reads**~~ — **Done** 2026-09-25. The three read functions use
+   `st.cache_data(ttl=30)`; all five writes now go through one `_patch_transaction` helper that
+   clears every read cache — in a `finally`, so even a failed write refetches (the backend may
+   have applied part of it). Errors aren't cached, so an API hiccup doesn't stick. The 30-second
+   TTL exists because the dashboard has **no upload control** — statements are uploaded straight to
+   the API, which the dashboard can't see, so new uploads take up to 30s (or a dashboard restart)
+   to appear. (That also means `docs/demo-feature-list.md` was wrong to say "via the dashboard's
+   upload control" — corrected to give the real API routes.)
+   **Measured against the live backend with the real 422-row dataset, per click (Streamlit rerun),
+   HEAD vs new**: Needs Review 2,644ms → **71ms**; Category Drill-in 278ms → **21ms**; Overview
+   242ms → **10ms**. Overview's ~2.35s *first* render is unchanged either way — a one-off
+   chart-library load on the first page in a fresh process, not API time; not in scope here.
+   Tests-first: new `tests/test_frontend_api_client.py` (11 tests — one client reused across
+   calls, unchanged request paths/params, cache hits/misses by argument, every write invalidating
+   every read, failed write still invalidating, failed read not cached). Existing dashboard tests
+   were unaffected (they patch these functions wholesale). 216 tests passing. `/code-review
+   medium` — **0 findings**. One edge case it noted and deliberately left alone: with two browser
+   tabs open, a read still in flight in one tab while the other saves a change could cache
+   pre-change data, shown for at most 30s. Not worth the complexity for a single-user local app.
 3. **J6 — Portfolio/asset view.** `Asset` entity, `GET /assets`, Portfolio page — **and** decide the
    Account↔Asset link (e.g. "JC is the account 6 Jericho Ct's rent lands in and its loan interest
    is charged from"), including whether a loan is its own `Asset`-like entity or a flag on
@@ -78,6 +92,13 @@ each one actually matters.
     would need their own backup).
 
 **Lower priority / no deadline:**
+- Dashboard read cache, multi-tab staleness (found by two `/code-review` passes on P2, 2026-09-25;
+  Rohan's call: backlog, not fix now). With two browser tabs open, a read still in flight in one
+  tab while the other saves a change can put pre-change data back into the shared `st.cache_data`
+  just after `_patch_transaction` cleared it, so every tab shows stale numbers for up to 30s.
+  Single-tab use is unaffected. Fix if it ever bites: a module-level "cache generation" counter
+  bumped on every write and passed as an extra argument to the cached reads, so anything fetched
+  before a write can never be served after it (~15 lines + a test).
 - CI/CD: register a self-hosted runner and watch one CD run complete (see the CI/CD section below).
 - Account rename/merge tooling — `unrecognised_account` rows are currently visibility-only, with
   no resolution action in the UI.

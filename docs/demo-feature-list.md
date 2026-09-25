@@ -57,9 +57,15 @@ project's standing operating mode, not a temporary gap — plain `uvicorn backen
    streamlit run frontend/dashboard.py
    ```
    It opens at `http://localhost:8501`.
-5. **Upload the sample statements**, in this order, via the dashboard's upload control (or
-   `POST /transactions/upload`): `BankTransactions - CC.xlsx`, then `- RC.xlsx`, then `- AC.xlsx`,
-   then `- JC.xlsx` — all in `transaction-files/`. **Skip MAC, MACACC, and NBA** — a different
+5. **Upload the sample statements**, in this order, via the API — the dashboard has no upload
+   control yet. Easiest is the interactive docs at `http://127.0.0.1:8000/docs` →
+   `POST /transactions/upload` → "Try it out"; or from a terminal in the project root:
+   ```powershell
+   curl.exe -F "file=@transaction-files/BankTransactions - CC.xlsx" http://127.0.0.1:8000/transactions/upload
+   ```
+   Files: `BankTransactions - CC.xlsx`, then `- RC.xlsx`, then `- AC.xlsx`, then `- JC.xlsx` — all
+   in `transaction-files/`. The dashboard caches reads for up to 30 seconds, so give it that long
+   (or restart it) before new uploads appear. **Skip MAC, MACACC, and NBA** — a different
    export shape the parser doesn't support yet (see "What's not in this demo" below). Uploading
    CC first matters: the seed rules were derived from CC's own historical data, so it has the
    highest rule-match rate and gives the cleanest "instant categorisation" moment before you get to
