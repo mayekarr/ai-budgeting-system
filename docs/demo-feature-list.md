@@ -9,7 +9,7 @@ statement files in `transaction-files/`, not synthetic data.
 
 ## What's built vs. what's coming
 
-**Built and demoable today (J1–J5):**
+**Built and demoable today (J1–J6):**
 
 | Journey | What it does |
 |---|---|
@@ -17,12 +17,12 @@ statement files in `transaction-files/`, not synthetic data.
 | J2 + J3 — View & drill into spending | Overview page: KPI row + spend-by-category chart. Drill-in: the transactions behind any category, with the same transfer/refund exclusions applied. |
 | J4 — Correct a miscategorisation | Fix a category/subcategory from Drill-in; the correction is remembered as a rule for future transactions from the same merchant (not retroactive). |
 | J5 — Needs-review queue | One combined, reason-filterable queue for anything uncertain: an unresolved account, an ambiguous refund, or a transfer match that isn't a sure thing — each with a one-click resolution. |
+| J6 — Portfolio/asset view | Portfolio page: income, expense and net per asset (Jericho Ct, Share Portfolio, Barkly Street) and in total, plus each asset's transactions. Loan interest and repayments are tagged by the loan number in the bank's text, so unrelated rows on a shared account stay untagged. One-time setup: `python -m scripts.seed_assets` (see `config/assets.example.json`). |
 
 **Not built yet — coming next, in this order (see `docs/next-steps.md` for the live-tracked list):**
 
 | Journey | What it'll add |
 |---|---|
-| J6 — Portfolio/asset view | An `Asset` entity (real estate, shares) and a Portfolio page — investments as a first-class view, not just cash flow. |
 | J7 — Tax refund (YoY) | A filter on top of J2's summary endpoint plus a chip on Overview, for "how much tax refund, year on year." |
 | J8 — Historical backfill | One-time import of the 13-year, ~14,300-row manual `Expense Log` (2012–2025), remapped into the current taxonomy. Deliberately last — needs the live pipeline proven on real imports first. |
 
@@ -51,6 +51,14 @@ project's standing operating mode, not a temporary gap — plain `uvicorn backen
    uvicorn backend.api:app --reload
    ```
    Confirm it's up at `http://127.0.0.1:8000/docs`.
+   Then, in a second terminal, **set up the assets** (J6, one-time; safe to re-run). This needs
+   `config/assets.local.json`, which is gitignored because it holds loan numbers. Copy it from
+   `config/assets.example.json` if it's missing:
+   ```powershell
+   python -m scripts.seed_assets
+   ```
+   Doing this before the uploads means rows are tagged as they arrive. Running it after works too:
+   it tags already-uploaded rows.
 4. **Start the dashboard**, in a second terminal:
    ```powershell
    .venv\Scripts\Activate.ps1
@@ -79,6 +87,7 @@ project's standing operating mode, not a temporary gap — plain `uvicorn backen
      elsewhere in the data didn't change (the "not retroactive" moment).
    - J5: open the Needs-Review queue, filter by reason, resolve one live (the Arvan/Nando's
      near-match transfer flag below is a good one — it's genuinely ambiguous, not staged).
+   - J6: open Portfolio → per-asset net → pick Jericho Ct to show its rent and loan interest.
 7. **Shut down** when done: `Ctrl+C` in both terminals.
 
 ## J1 — Upload a statement
@@ -224,4 +233,7 @@ the reason why, and one click resolves it."
 - The full 3-account RC→MAC→MACACC transfer chain — depends on the above; only the AC↔JC and JC↔CC
   pairs above are demoable today.
 - Unrecognised-account resolution UI (rename/merge) — flagged for visibility only, no fix-it action.
-- J6/J7/J8 and Phase 2 (forecasting, cloud deployment) — see the table at the top of this doc.
+- J7/J8 and Phase 2 (forecasting, cloud deployment) — see the table at the top of this doc.
+- Dividends aren't tagged to `Share Portfolio` yet: only the share loan's interest is. Tagging them
+  needs `AssetAlias` patterns for the holdings, and MAC (where the dividends land) can't be parsed
+  yet anyway.

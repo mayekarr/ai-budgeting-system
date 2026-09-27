@@ -1,7 +1,7 @@
 # Design Phase: Data Model, API & Categorisation Rules
 
 Status: Active
-Last updated: 2026-08-18
+Last updated: 2026-09-25
 Companion to: `docs/design-journeys.md` (the storyboard this design is derived from — read that
 first), `docs/product-requirements.md` (requirements/decisions), and `docs/next-steps.md`.
 This doc serves J1, J4, J5 (rule-learning half), J6, J7, J8 — see `docs/design-journeys.md` for the
@@ -39,6 +39,27 @@ resolves an incoming statement's account identifier through this table rather th
 **`Asset`** (new — the `Investment`/`Asset` entity from §4.2) — `id`, `type` (Real Estate/Shares/
 Managed Fund), `name` (Hillside/JerichoCt/Alexa/Sylvania/NAB Shares/...), `owner`, `notes`. One row
 per named holding. *Serves J6.*
+**Built 2026-09-25 (J6), with these additions from the J6 design pass** (decisions and reasoning
+in `docs/product-requirements.md` §4.2):
+- `Asset.name` is unique. New `Residence` type (Barkly Street). New `is_active` flag so J8 can add
+  sold properties without another schema change (there's no migration tooling).
+- **`AssetAlias`** (new) — `id`, `asset_id` FK, `pattern` (unique). A description substring naming
+  an asset (e.g. `6 JERICHO CT` on the rent credit). It works like `AccountAlias`, and it's kept
+  separate from `CategorisationRule` so asset tagging doesn't depend on which path decided the
+  category.
+- **`Account.asset_id`** (nullable FK). A **loan is an `Account`** with `account_type="Loan"`, its
+  loan number as an `AccountAlias`, and `asset_id` naming what it finances.
+- **Attribution order** (`assets/attribution.py`, first match wins): (1) the description names a
+  loan account's alias → that loan's asset; (2) an `AssetAlias` pattern matches; (3) the
+  transaction's own account has `asset_id`. Lookups are loaded once per upload. `reattribute_assets`
+  re-derives **every** row after an asset, alias or link changes. It covers all rows, not just
+  untagged ones, so a relinked or unlinked loan doesn't leave stale tags. That's safe because
+  nothing sets a tag by hand. (The first version only filled in untagged rows; `/code-review`
+  caught the stale-tag problem.)
+- API as built: `GET /assets` (every asset, including inactive ones, with `income`/`expense`/`net`
+  split the same way as `GET /summary`, plus a `total`), `GET /assets/{id}/transactions` (same
+  Transfer/superseded exclusions), `POST /assets`, `PATCH /accounts/{id}`. Setup is through
+  `python -m scripts.seed_assets`, reading the gitignored `config/assets.local.json`.
 
 **`TransferGroup`** (new — added 2026-08-18 during the reconciliation pass with
 `docs/design-logic-and-ux.md`) — `id`, `detection_tier` (1 or 2), `confidence`, `created_at`. One row

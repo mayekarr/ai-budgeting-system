@@ -2,7 +2,7 @@
 
 Status: Draft v9
 Owner: Rohan Mayekar
-Last updated: 2026-08-18
+Last updated: 2026-09-25
 Source: `Project_objectives_raw.md`
 
 Companion document: a separate **Agentic Development Workflow** doc will cover `.claude/` setup,
@@ -205,6 +205,32 @@ covering **all** accounts including income):
   transactions; share/fund assets get Dividend/Buy/Sell-tagged transactions. This lets the dashboard
   show a single portfolio view across all investment types, or filter to one asset — directly
   supporting the user's "review all my investments" use case.
+  **Decided 2026-09-25 (J6 design pass, Rohan's calls):**
+  - **A loan is an `Account`** (`account_type="Loan"`), with its loan number as an `AccountAlias`
+    and an `asset_id` link to the asset it finances. The other options were a separate `Loan` table
+    (a second account-like table duplicating `Account`/`AccountAlias`) or a link on the everyday
+    account only. The everyday-only option was ruled out by the real data: JC isn't used only for
+    Jericho Ct (it also pays the NAB card autopay and donations), so linking all of JC would mis-tag
+    those rows. The loan lines name their own loan accounts instead (`INTEREST CHARGED FROM A/C
+    34-188-5257`), which is structural and survives the bank rewording the text. Real loan
+    statements can be uploaded later without changing the model.
+  - **Real mapping:** loan 34-188-5257 → Jericho Ct (Real Estate). 34-189-2465 → a single
+    `Share Portfolio` asset (the loan funds the portfolio as a whole; it can be split per holding
+    later if needed). The home loan → Barkly Street, the current residence, as a new `Residence`
+    asset type. Rohan gave that loan as "6280". The statement line reads `703206283`; **confirmed by
+    Rohan 2026-09-27** to be the same loan. Hillside, Alexa and Sylvania are **sold**. They
+    come back in J8's backfill as inactive assets (`Asset.is_active=False`), not now.
+  - **Barkly Street's asset record sits alongside `Housing`, not instead of it**: its costs stay
+    categorised as `Housing`/`Loans & Finance` as before. The asset tag only adds a per-property
+    view. The old log's `Barkley` subcategory (remapped to Shares/Managed Fund in 4.2.1 below) may
+    or may not be the same thing. **Open question for J8**, flagged rather than guessed.
+  - **J6 scope is asset *tagging* only.** `Transaction.asset_id` is set by a three-step order: loan
+    number in the description → `AssetAlias` description pattern (e.g. `6 JERICHO CT` on the rent
+    credit) → the transaction's own account's link. It never changes a category or type. Rules that
+    apply only to one account (`CategorisationRule.account_id`) were considered and deferred: no
+    real failure needs them yet.
+  - **Setup:** a gitignored `config/assets.local.json` plus `python -m scripts.seed_assets`, with
+    `POST /assets` / `PATCH /accounts/{id}` as API equivalents. No setup UI.
 **Final merged category list (Decided 2026-08-18)** — 16 top-level categories, synthesized from
 Source 1, Source 2's `Parameters` sheet (18 real leaf categories under an `Earning`/`Expense` `Type`
 flag, ~78 sub-categories total — corrects the earlier "20×85" approximation), and the 6 additional

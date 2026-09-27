@@ -60,10 +60,41 @@ each one actually matters.
    medium` — **0 findings**. One edge case it noted and deliberately left alone: with two browser
    tabs open, a read still in flight in one tab while the other saves a change could cache
    pre-change data, shown for at most 30s. Not worth the complexity for a single-user local app.
-3. **J6 — Portfolio/asset view.** `Asset` entity, `GET /assets`, Portfolio page — **and** decide the
-   Account↔Asset link (e.g. "JC is the account 6 Jericho Ct's rent lands in and its loan interest
-   is charged from"), including whether a loan is its own `Asset`-like entity or a flag on
-   `Account`, so categorisation can key off account context instead of fragile text patterns.
+3. ~~**J6 — Portfolio/asset view.**~~ — **Done** 2026-09-25 (real `finance.db` rebuilt and committed
+   2026-09-27). Designed in Plan Mode first. Decisions and reasoning are in
+   `docs/product-requirements.md` §4.2; data model/API in `docs/design-data-model-api.md`. In short:
+   **a loan is an `Account`** (`account_type="Loan"`, loan number as `AccountAlias`, `asset_id`
+   link). A transaction's asset is **tagged, never re-categorised**, first match wins: loan number
+   in the description → `AssetAlias` pattern (`6 JERICHO CT`) → own account's link. The real data
+   decided it: JC is shared (card autopay, Oxfam), so linking all of JC would mis-tag those rows,
+   but every loan line names its loan account. Setup is a gitignored `config/assets.local.json` plus
+   `python -m scripts.seed_assets` (committed example: `config/assets.example.json`); `POST /assets`
+   and `PATCH /accounts/{id}` are the API equivalents. New Portfolio page
+   (`frontend/pages/4_Portfolio.py`).
+   **Verified against the real CC/RC/AC/JC files** in a scratch DB (the real `finance.db`
+   untouched): Jericho Ct +$2,704.86 rent / −$4,877.79 interest; Share Portfolio −$3,847.91; Barkly
+   Street −$1,843.21; JC's Oxfam and card-autopay rows untagged; Overview totals unchanged (income
+   $61,290.76). Re-running the seed changes 0 rows. Tests-first: 216 → **269 passing**.
+   `/code-review medium` raised 6 findings; 5 fixed tests-first: blank alias would tag every row;
+   duplicate alias returned a 500 instead of a 409; `PATCH /accounts {"name": null}` returned a 500;
+   relinking or unlinking a loan left stale tags (fix: `reattribute_assets` re-derives every row,
+   which is safe because nothing sets a tag by hand); the seed crashed when an alias moved between
+   assets. The 6th was left as designed: a loan *repayment* counts in full as asset expense, because
+   J6 is defined as a cash-flow view (the journey explicitly lists EMI). See the loan-statement
+   caveat below.
+   **Still open from J6:**
+   - ~~Rebuild the real `finance.db`~~ — **Done** 2026-09-27. Seeded assets, then re-uploaded
+     CC → RC → AC → JC (422 rows, 4 asset-tagged, same totals as the scratch run). The backend was
+     running and had the file locked, so the new DB was written into the open file with SQLite's
+     online backup API instead of delete-and-replace. That meant no processes were killed. The old
+     DB was backed up the same way to the session scratchpad first. **The running backend and
+     dashboard still need a restart to load the J6 code** (`/assets` returns 404 until then).
+   - ~~Confirm the Barkly Street loan number~~ — **Confirmed** by Rohan 2026-09-27: `703206283`.
+   - **Visual check of the Portfolio page** (`/run`). The behaviour is covered by AppTest; the
+     layout hasn't been looked at.
+   - Stale `.claude/worktrees/j6-portfolio-assets` directory + `worktree-j6-portfolio-assets`
+     branch from 2026-09-19. No commits beyond `main`, and git no longer tracks it as a worktree.
+     Safe to delete; ask first.
 4. **J7 — Tax refund (YoY).** A filter on top of `GET /summary` + a chip on Overview.
 5. **MAC/MACACC/NBA statement parsers** (README-documented fast-follow — only the NAB-style CC/RC/
    AC/JC formats parse today). Unblocks the full RC→MAC→MACACC transfer chain (§4.1) and should
@@ -96,6 +127,20 @@ each one actually matters.
     would need their own backup).
 
 **Lower priority / no deadline:**
+- **Account-scoped categorisation rules** (`CategorisationRule.account_id`). Considered in J6's
+  design pass and deferred (Rohan's call, 2026-09-25): J6 only tags assets. Build it if text
+  patterns keep breaking on a specific account.
+- **Tag dividends to `Share Portfolio`.** Only the share loan's interest is tagged today. This needs
+  `AssetAlias` patterns for the holdings (VAS/VEU/…, NAB dividend; decide whether the EquatePlus
+  employee shares count), and MAC, where the dividends land, isn't parseable until item 5.
+- **Loan-statement double count (J6 caveat).** Once a real loan statement is uploaded, its own rows
+  get tagged by the loan's account link. A repayment debit on the everyday account plus the loan's
+  own credit and interest rows would then double-count, *unless* transfer pairing links the
+  repayment to the loan's credit (which excludes both). Check this the first time a loan statement
+  is uploaded.
+- **J8 question:** the old log's `Barkley` subcategory is remapped to Shares/Managed Fund in
+  `docs/product-requirements.md` §4.2.1. Is it actually Barkly Street (the residence)? Ask Rohan
+  before J8's remapping.
 - Dashboard read cache, multi-tab staleness (found by two `/code-review` passes on P2, 2026-09-25;
   Rohan's call: backlog, not fix now). With two browser tabs open, a read still in flight in one
   tab while the other saves a change can put pre-change data back into the shared `st.cache_data`
@@ -892,7 +937,8 @@ start here" above; it supersedes the ordering of the remaining items (J6–J8) b
       assistant, since it's his real source data; possibly an accidental edit from the file being
       open in Excel for an extended period this session (see the CC/RC/JC file-lock notes above).
       **Not yet resolved as of this note.**
-   6. **J6 — Portfolio/asset view**. `Asset` entity, `GET /assets` endpoints, Portfolio page.
+   6. ~~**J6 — Portfolio/asset view**~~ — **Done** 2026-09-25; see "Pending work" item 3 at the top.
+      `Asset` entity, `GET /assets` endpoints, Portfolio page.
       **Scope note added 2026-09-25** (see the design-idea paragraph just above): the design pass
       must also decide how/whether to link specific `Account`s to an `Asset` (or a loan-bearing
       account to whatever represents a loan), so categorisation/reporting can key off account-level

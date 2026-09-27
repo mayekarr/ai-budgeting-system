@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import backend.api as api_module
-from backend.models import Account, AccountAlias, Base
+from backend.models import Account, AccountAlias, Asset, AssetAlias, Base
 from categorisation.seed_rules import seed_rules_if_empty
 
 SAMPLE_CSV = (
@@ -314,6 +314,54 @@ def test_upload_categorises_a_real_salary_credit_as_income_without_llm(tmp_path,
 
     summary = no_key_client.get("/summary").json()
     assert summary["total_income"] == 5317.55
+
+
+def test_upload_tags_real_jc_rows_to_assets_without_changing_categories(tmp_path, monkeypatch):
+    # J6: the real JC account is shared (card autopay, donations) but its loan lines name their own
+    # loan accounts, and the rent credit names the property -- each lands on the right asset, and
+    # the unrelated rows stay untagged.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    db_path = tmp_path / "test_finance.db"
+    engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+    TestSessionLocal = sessionmaker(bind=engine)
+    monkeypatch.setattr(api_module, "engine", engine)
+    monkeypatch.setattr(api_module, "SessionLocal", TestSessionLocal)
+    Base.metadata.create_all(bind=engine)
+    with TestSessionLocal() as seed_session:
+        seed_rules_if_empty(seed_session)
+        jericho = Asset(name="Jericho Ct", type="Real Estate")
+        shares = Asset(name="Share Portfolio", type="Shares")
+        seed_session.add_all([jericho, shares])
+        seed_session.flush()
+        seed_session.add(AssetAlias(asset_id=jericho.id, pattern="6 JERICHO CT"))
+        jc = Account(name="JC", institution="NAB", owner="Rohan", account_type="Everyday")
+        seed_session.add(jc)
+        seed_session.flush()
+        seed_session.add(AccountAlias(account_id=jc.id, raw_identifier="147912573"))
+        for number, asset in [("34-188-5257", jericho), ("34-189-2465", shares)]:
+            loan = Account(name=f"{asset.name} loan", account_type="Loan", asset_id=asset.id)
+            seed_session.add(loan)
+            seed_session.flush()
+            seed_session.add(AccountAlias(account_id=loan.id, raw_identifier=number))
+        seed_session.commit()
+        jericho_id, shares_id = jericho.id, shares.id
+
+    no_key_client = TestClient(api_module.app)
+    csv = ("Date,Amount,Account Number,Transaction Type,Transaction Details,Balance,Category,Merchant Name,Processed On\n"
+           "2026-07-31,-4877.79,147912573,INTEREST,INTEREST CHARGED FROM A/C 34-188-5257,-100.00,,,\n"
+           "2026-07-31,-3847.91,147912573,INTEREST,INTEREST CHARGED FROM A/C 34-189-2465,-200.00,,,\n"
+           "2026-08-05,2704.86,147912573,DIRECT CREDIT,6 Jericho Ct Berwi The Apostoli Gro Anila Mayekar &,-300.00,,,\n"
+           "2026-08-10,-50.00,147912573,DIRECT DEBIT,P0006175750 OXFAM AUSTRALIA Anila Mayekar,-400.00,Donations,,\n")
+    assert _upload(no_key_client, csv).status_code == 201
+
+    rows = {r["raw_description"]: r for r in no_key_client.get("/transactions").json()}
+    assert rows["INTEREST CHARGED FROM A/C 34-188-5257"]["asset_id"] == jericho_id
+    assert rows["INTEREST CHARGED FROM A/C 34-189-2465"]["asset_id"] == shares_id
+    rent = rows["6 Jericho Ct Berwi The Apostoli Gro Anila Mayekar &"]
+    assert rent["asset_id"] == jericho_id
+    assert (rent["category"], rent["subcategory"]) == ("Income", "Rental Income")
+    assert rows["INTEREST CHARGED FROM A/C 34-188-5257"]["category"] == "Loans & Finance"
+    assert rows["P0006175750 OXFAM AUSTRALIA Anila Mayekar"]["asset_id"] is None
 
 
 def test_persistence_failure_returns_controlled_500_not_unhandled_exception(client, monkeypatch):

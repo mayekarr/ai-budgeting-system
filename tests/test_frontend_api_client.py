@@ -65,6 +65,19 @@ def test_requests_keep_the_same_paths_and_params(http):
     fake.patch.assert_called_once_with("/transactions/5", json={"confirm_transfer_with_id": 9})
 
 
+def test_asset_reads_use_the_asset_endpoints(http):
+    fake, _ = http
+
+    api_client.get_assets(date_from=date(2026, 7, 1), date_to=date(2026, 8, 31))
+    api_client.get_asset_transactions(4, date_from=date(2026, 7, 1))
+
+    get_calls = [(c.args[0], c.kwargs.get("params")) for c in fake.get.call_args_list]
+    assert get_calls == [
+        ("/assets", {"date_from": "2026-07-01", "date_to": "2026-08-31"}),
+        ("/assets/4/transactions", {"date_from": "2026-07-01"}),
+    ]
+
+
 def test_repeated_identical_reads_are_served_from_cache(http):
     # P2: Streamlit reruns the whole page on every widget click; an unchanged read shouldn't
     # go back to the API each time.
@@ -103,15 +116,20 @@ def test_every_write_invalidates_cached_reads(http, write):
     # Needs Review both rerun straight after a save, expecting fresh data.
     fake, _ = http
 
-    api_client.get_summary()
-    api_client.get_transactions(needs_review=True)
-    api_client.get_suggested_transfer_match(3)
-    write()
-    api_client.get_summary()
-    api_client.get_transactions(needs_review=True)
-    api_client.get_suggested_transfer_match(3)
+    def read_everything():
+        api_client.get_summary()
+        api_client.get_transactions(needs_review=True)
+        api_client.get_suggested_transfer_match(3)
+        # A category or transfer change moves money between an asset's income/expense or in/out of
+        # its totals, so the Portfolio reads must refresh too.
+        api_client.get_assets()
+        api_client.get_asset_transactions(1)
 
-    assert fake.get.call_count == 6
+    read_everything()
+    write()
+    read_everything()
+
+    assert fake.get.call_count == 10
 
 
 def test_a_failed_write_still_invalidates_cached_reads(http):

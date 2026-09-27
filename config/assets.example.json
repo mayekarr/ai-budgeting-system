@@ -1,0 +1,12 @@
+{
+  "assets": [
+    {"name": "Example Investment Property", "type": "Real Estate", "aliases": ["1 EXAMPLE ST"]},
+    {"name": "Example Share Portfolio", "type": "Shares"},
+    {"name": "Example Home", "type": "Residence"}
+  ],
+  "loans": [
+    {"number": "00-000-0001", "name": "Investment property loan", "asset": "Example Investment Property"},
+    {"number": "00-000-0002", "name": "Share loan", "asset": "Example Share Portfolio"},
+    {"number": "000000003", "name": "Home loan", "asset": "Example Home"}
+  ]
+}

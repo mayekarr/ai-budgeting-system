@@ -11,3 +11,4 @@ st.markdown(
 )
 st.page_link("pages/1_Overview.py", label="Go to Overview →")
 st.page_link("pages/3_Needs_Review.py", label="Go to Needs Review →")
+st.page_link("pages/4_Portfolio.py", label="Go to Portfolio →")

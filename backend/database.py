@@ -169,6 +169,7 @@ def save_transaction(
     confidence_score: Optional[float] = None,
     raw_transaction_type: Optional[str] = None,
     balance: Optional[float] = None,
+    asset_id: Optional[int] = None,
 ) -> Optional[Transaction]:
     """
     Persist a single transaction, skipping it if it's a duplicate of an existing row (FR-3), and
@@ -204,6 +205,7 @@ def save_transaction(
         raw_transaction_type=raw_transaction_type,
         balance=balance,
         superseded_by_id=superseded_by_id,
+        asset_id=asset_id,
     )
     session.add(tx)
     session.flush()  # assign tx.id, needed below and by callers linking against it immediately
@@ -247,6 +249,7 @@ def bulk_save_transactions(session: Session, transactions: Iterable[Mapping]) ->
             confidence_score=t.get("confidence_score"),
             raw_transaction_type=t.get("raw_transaction_type"),
             balance=t.get("balance"),
+            asset_id=t.get("asset_id"),
         )
         if result is not None:
             saved.append(result)

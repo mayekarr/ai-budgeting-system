@@ -6,7 +6,9 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from backend.models import Account, AccountAlias, Base, CategorisationRule, Transaction, TransferGroup
+from backend.models import (
+    Account, AccountAlias, Asset, AssetAlias, Base, CategorisationRule, Transaction, TransferGroup,
+)
 
 
 @pytest.fixture()
@@ -97,3 +99,52 @@ def test_categorisation_rule_fields(session):
     fetched = session.query(CategorisationRule).filter_by(pattern="WOOLWORTHS").one()
     assert fetched.category == "Groceries"
     assert fetched.is_active is True
+
+
+def test_asset_defaults_to_active_and_has_aliases(session):
+    asset = Asset(name="Jericho Ct", type="Real Estate")
+    session.add(asset)
+    session.flush()
+    session.add(AssetAlias(asset_id=asset.id, pattern="6 JERICHO CT"))
+    session.commit()
+
+    fetched = session.query(Asset).filter_by(name="Jericho Ct").one()
+    assert fetched.is_active is True
+    assert [a.pattern for a in fetched.aliases] == ["6 JERICHO CT"]
+
+
+def test_asset_name_is_unique(session):
+    session.add(Asset(name="Jericho Ct", type="Real Estate"))
+    session.commit()
+    session.add(Asset(name="Jericho Ct", type="Real Estate"))
+    with pytest.raises(Exception):
+        session.commit()
+
+
+def test_asset_alias_pattern_is_unique(session):
+    asset = Asset(name="Jericho Ct", type="Real Estate")
+    session.add(asset)
+    session.flush()
+    session.add(AssetAlias(asset_id=asset.id, pattern="6 JERICHO CT"))
+    session.commit()
+    session.add(AssetAlias(asset_id=asset.id, pattern="6 JERICHO CT"))
+    with pytest.raises(Exception):
+        session.commit()
+
+
+def test_loan_account_and_transaction_link_to_asset(session):
+    asset = Asset(name="Jericho Ct", type="Real Estate")
+    session.add(asset)
+    session.flush()
+    loan = Account(name="Jericho Ct loan", account_type="Loan", asset_id=asset.id)
+    everyday = Account(name="JC", account_type="Everyday")
+    session.add_all([loan, everyday])
+    session.flush()
+    tx = Transaction(account_id=everyday.id, date=date(2026, 7, 31), amount=-4877.79,
+                     raw_description="INTEREST CHARGED FROM A/C 34-188-5257", asset_id=asset.id)
+    session.add(tx)
+    session.commit()
+
+    assert loan.asset.name == "Jericho Ct"
+    assert everyday.asset_id is None
+    assert tx.asset.name == "Jericho Ct"

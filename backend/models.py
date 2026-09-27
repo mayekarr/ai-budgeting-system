@@ -11,8 +11,47 @@ class Base(DeclarativeBase):
     """Base class for SQLAlchemy models."""
 
 
+class Asset(Base):
+    """
+    A named investable asset (a property, a share portfolio, ...) that transactions can be tagged
+    against for the Portfolio view (J6). is_active=False keeps a sold asset's history reportable.
+    """
+
+    __tablename__ = "assets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    type: Mapped[str] = mapped_column(String(50), nullable=False)
+    owner: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    aliases: Mapped[list["AssetAlias"]] = relationship(back_populates="asset")
+    accounts: Mapped[list["Account"]] = relationship(back_populates="asset")
+
+
+class AssetAlias(Base):
+    """
+    A description substring that identifies an Asset (e.g. "6 JERICHO CT" on a rent credit).
+
+    Deliberately separate from CategorisationRule: asset tagging is independent of how a
+    transaction's category was decided (rule, bank category, or fallback).
+    """
+
+    __tablename__ = "asset_aliases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id"), nullable=False, index=True)
+    pattern: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+
+    asset: Mapped["Asset"] = relationship(back_populates="aliases")
+
+
 class Account(Base):
-    """One of the user's real-world bank accounts."""
+    """
+    One of the user's real-world bank accounts. A loan is an Account too (account_type="Loan"),
+    with its loan number as an AccountAlias and asset_id naming the asset it finances.
+    """
 
     __tablename__ = "accounts"
 
@@ -21,7 +60,9 @@ class Account(Base):
     institution: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     owner: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     account_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    asset_id: Mapped[Optional[int]] = mapped_column(ForeignKey("assets.id"), nullable=True, index=True)
 
+    asset: Mapped[Optional["Asset"]] = relationship(back_populates="accounts")
     aliases: Mapped[list["AccountAlias"]] = relationship(back_populates="account")
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="account")
 
@@ -110,6 +151,8 @@ class Transaction(Base):
     superseded_by_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("transactions.id"), nullable=True, index=True
     )
+    # J6: set by assets/attribution.py; independent of category/type.
+    asset_id: Mapped[Optional[int]] = mapped_column(ForeignKey("assets.id"), nullable=True, index=True)
 
     source: Mapped[str] = mapped_column(String(20), nullable=False, default="bank_import")
     needs_review: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
@@ -130,3 +173,4 @@ class Transaction(Base):
 
     account: Mapped["Account"] = relationship(back_populates="transactions")
     transfer_group: Mapped[Optional["TransferGroup"]] = relationship(back_populates="members")
+    asset: Mapped[Optional["Asset"]] = relationship()

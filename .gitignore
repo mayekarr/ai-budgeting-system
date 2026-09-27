@@ -8,3 +8,6 @@ logs/
 # Real personal bank statement / categorisation data — never commit, local-only.
 transaction-files/*.xlsx
 docs/AU COST - Manual categorisation.xlsx
+
+# Real asset names and loan account numbers (J6) — local-only; see config/assets.example.json.
+config/assets.local.json

@@ -78,6 +78,27 @@ def get_suggested_transfer_match(transaction_id: int) -> Optional[dict]:
     return _get(f"/transactions/{transaction_id}/suggested-transfer-match")
 
 
+def _date_params(date_from: Optional[date], date_to: Optional[date]) -> dict:
+    params = {}
+    if date_from is not None:
+        params["date_from"] = date_from.isoformat()
+    if date_to is not None:
+        params["date_to"] = date_to.isoformat()
+    return params
+
+
+@st.cache_data(ttl=_READ_CACHE_TTL_SECONDS, show_spinner=False)
+def get_assets(date_from: Optional[date] = None, date_to: Optional[date] = None) -> dict:
+    return _get("/assets", _date_params(date_from, date_to))
+
+
+@st.cache_data(ttl=_READ_CACHE_TTL_SECONDS, show_spinner=False)
+def get_asset_transactions(
+    asset_id: int, date_from: Optional[date] = None, date_to: Optional[date] = None
+) -> list[dict]:
+    return _get(f"/assets/{asset_id}/transactions", _date_params(date_from, date_to))
+
+
 def _patch_transaction(transaction_id: int, payload: dict) -> dict:
     try:
         response = _client().patch(f"/transactions/{transaction_id}", json=payload)
@@ -90,6 +111,8 @@ def _patch_transaction(transaction_id: int, payload: dict) -> dict:
         get_summary.clear()
         get_transactions.clear()
         get_suggested_transfer_match.clear()
+        get_assets.clear()
+        get_asset_transactions.clear()
 
 
 def correct_transaction_category(

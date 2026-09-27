@@ -8,10 +8,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from assets.attribution import attribute_asset, load_asset_lookups, reattribute_assets
+from assets.service import AliasInUseError, asset_cash_flows, asset_transactions_query, create_asset
 from categorisation.bank_category import categorise_from_bank_category
 from categorisation.claude_fallback import categorise_with_fallback
 from categorisation.rules import match_rule
@@ -23,7 +25,7 @@ from transfers.detection import find_suggested_transfer_match, link_transfer_pai
 from transfers.refunds import detect_refund
 
 from .database import SessionLocal, bulk_save_transactions, create_tables, engine  # noqa: F401  (engine kept for test monkeypatching)
-from .models import CategorisationRule, Transaction
+from .models import Account, Asset, CategorisationRule, Transaction
 from .needs_review_reasons import (
     LLM_UNAVAILABLE,
     LOW_CONFIDENCE_CATEGORY,
@@ -78,6 +80,7 @@ class TransactionOut(BaseModel):
     is_refund: bool
     transfer_group_id: int | None
     superseded_by_id: int | None
+    asset_id: int | None
     source: str
     needs_review: bool
     needs_review_reason: str | None
@@ -128,6 +131,76 @@ class SummaryOut(BaseModel):
     by_income_category: List[CategorySummary]
 
 
+class AssetCashFlowOut(BaseModel):
+    id: int
+    name: str
+    type: str
+    is_active: bool
+    income: float
+    expense: float
+    net: float
+
+
+class CashFlowTotal(BaseModel):
+    income: float
+    expense: float
+    net: float
+
+
+class AssetsOut(BaseModel):
+    assets: List[AssetCashFlowOut]
+    total: CashFlowTotal
+
+
+class AssetCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    type: str
+    owner: str | None = None
+    notes: str | None = None
+    is_active: bool = True
+    aliases: List[str] = []
+
+
+class AssetOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    type: str
+    owner: str | None
+    notes: str | None
+    is_active: bool
+
+
+class AccountUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    account_type: str | None = None
+    asset_id: int | None = None  # explicit null unlinks
+
+    @field_validator("name")
+    @classmethod
+    def _name_not_null(cls, value: str | None) -> str:
+        # Only runs when name is sent; an explicit null would violate accounts.name NOT NULL.
+        if value is None or not value.strip():
+            raise ValueError("name cannot be null or blank")
+        return value
+
+
+class AccountOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    institution: str | None
+    owner: str | None
+    account_type: str | None
+    asset_id: int | None
+
+
 def get_session() -> Generator[Session, None, None]:
     """FastAPI dependency; reads SessionLocal from this module so tests can swap it out."""
     db = SessionLocal()
@@ -159,6 +232,8 @@ async def upload_transactions(
         logger.warning("NAB format parse error: %s", exc)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
+    # Loaded once for the whole upload, not per row (the per-row reload pattern is P4's problem).
+    asset_lookups = load_asset_lookups(db)
     to_persist = []
     for row in parsed_rows:
         resolved = resolve_account(db, row.account_identifier)
@@ -227,6 +302,7 @@ async def upload_transactions(
                 "confidence_score": confidence,
                 "raw_transaction_type": row.raw_transaction_type,
                 "balance": row.balance,
+                "asset_id": attribute_asset(row.raw_description, resolved.account.id, asset_lookups),
             }
         )
 
@@ -601,3 +677,74 @@ def get_summary(
         by_category=by_category,
         by_income_category=by_income_category,
     )
+
+
+@app.get("/assets", response_model=AssetsOut)
+def list_assets(
+    db: Session = Depends(get_session),
+    date_from: Optional[date_type] = Query(default=None),
+    date_to: Optional[date_type] = Query(default=None),
+) -> AssetsOut:
+    """Portfolio view (J6): each asset's income, expense and net over a period, plus a total."""
+    flows = asset_cash_flows(db, date_from, date_to)
+    assets = [
+        AssetCashFlowOut(
+            id=f.asset.id, name=f.asset.name, type=f.asset.type, is_active=f.asset.is_active,
+            income=f.income, expense=f.expense, net=f.net,
+        )
+        for f in flows
+    ]
+    income = sum(f.income for f in flows)
+    expense = sum(f.expense for f in flows)
+    return AssetsOut(assets=assets, total=CashFlowTotal(income=income, expense=expense, net=income - expense))
+
+
+@app.get("/assets/{asset_id}/transactions", response_model=List[TransactionOut])
+def list_asset_transactions(
+    asset_id: int,
+    db: Session = Depends(get_session),
+    date_from: Optional[date_type] = Query(default=None),
+    date_to: Optional[date_type] = Query(default=None),
+) -> List[Transaction]:
+    if db.get(Asset, asset_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found.")
+    return asset_transactions_query(db, asset_id, date_from, date_to).order_by(Transaction.date.desc()).all()
+
+
+@app.post("/assets", status_code=status.HTTP_201_CREATED, response_model=AssetOut)
+def add_asset(payload: AssetCreate, db: Session = Depends(get_session)) -> Asset:
+    if db.query(Asset).filter_by(name=payload.name).one_or_none() is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An asset with that name already exists.")
+    try:
+        asset = create_asset(
+            db, name=payload.name, type=payload.type, owner=payload.owner, notes=payload.notes,
+            is_active=payload.is_active, aliases=tuple(payload.aliases),
+        )
+    except AliasInUseError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    db.commit()
+    return asset
+
+
+@app.patch("/accounts/{account_id}", response_model=AccountOut)
+def update_account(account_id: int, payload: AccountUpdate, db: Session = Depends(get_session)) -> Account:
+    """
+    Rename an account, set its type, or link it to an asset (e.g. mark a loan account as financing
+    a property, or null to unlink). Existing rows are re-derived, so a relink moves their tags too.
+    """
+    account = db.get(Account, account_id)
+    if account is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found.")
+    updates = payload.model_dump(exclude_unset=True)
+    if updates.get("asset_id") is not None and db.get(Asset, updates["asset_id"]) is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown asset_id.")
+    for field, value in updates.items():
+        setattr(account, field, value)
+    db.flush()
+    reattribute_assets(db)
+    db.commit()
+    return account
