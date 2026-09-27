@@ -97,7 +97,8 @@ each one actually matters.
        endpoint. Tests-first, 271 passing.
      - Rohan saw an empty page: the default "This Month" (September) has no data, because the
        statements run from late July to mid-August. Not a bug. Offered to default Portfolio to
-       "Last 12 Months" (asset cash flow is lumpy month to month). **Awaiting Rohan's call.**
+       "Last 12 Months" (asset cash flow is lumpy month to month). **Decided** 2026-09-27, Rohan's
+       call: no change. Portfolio keeps "This Month", the same default as Overview.
      - Fixed the documented launch commands in `CLAUDE.md` and `docs/demo-feature-list.md`: they
        must be `python -m streamlit` / `python -m uvicorn`. Bare `streamlit run` only puts
        `frontend/` on `sys.path`, so every page fails with `No module named 'frontend'`.
