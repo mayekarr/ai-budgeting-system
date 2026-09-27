@@ -57,27 +57,35 @@ st.dataframe(
     hide_index=True,
 )
 
+ALL_ASSETS = "All Assets"
 asset_ids = {a["name"]: a["id"] for a in assets}
-selected = st.selectbox("Asset transactions", list(asset_ids), key="portfolio_asset_select")
+selected = st.selectbox(
+    "Asset transactions", [ALL_ASSETS] + list(asset_ids), key="portfolio_asset_select"
+)
+names_to_show = list(asset_ids) if selected == ALL_ASSETS else [selected]
 
-try:
-    transactions = get_asset_transactions(asset_ids[selected], date_from=date_from, date_to=date_to)
-except Exception as exc:  # pylint: disable=broad-except
-    st.error(f"Could not load transactions for {selected}: {exc}")
-    st.stop()
+# "All Assets" reuses the per-asset endpoint, one cached call per asset -- a handful of assets, so
+# not worth a separate combined endpoint.
+transactions = []
+for name in names_to_show:
+    try:
+        rows = get_asset_transactions(asset_ids[name], date_from=date_from, date_to=date_to)
+    except Exception as exc:  # pylint: disable=broad-except
+        st.error(f"Could not load transactions for {name}: {exc}")
+        st.stop()
+    transactions.extend({**t, "_asset": name} for t in rows)
+transactions.sort(key=lambda t: t["date"], reverse=True)
 
 if not transactions:
     st.info(f"No transactions for {selected} in the selected range.")
 else:
-    st.dataframe(
-        pd.DataFrame(
-            {
-                "Date": [t["date"] for t in transactions],
-                "Description": [t["raw_description"] for t in transactions],
-                "Category": [t["category"] for t in transactions],
-                "Subcategory": [t["subcategory"] for t in transactions],
-                "Amount": [t["amount"] for t in transactions],
-            }
-        ),
-        hide_index=True,
-    )
+    columns = {
+        "Date": [t["date"] for t in transactions],
+        "Description": [t["raw_description"] for t in transactions],
+        "Category": [t["category"] for t in transactions],
+        "Subcategory": [t["subcategory"] for t in transactions],
+        "Amount": [t["amount"] for t in transactions],
+    }
+    if selected == ALL_ASSETS:
+        columns = {"Asset": [t["_asset"] for t in transactions], **columns}
+    st.dataframe(pd.DataFrame(columns), hide_index=True)

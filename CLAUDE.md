@@ -19,8 +19,12 @@ rule-based categorisation (`categorisation/`) · Streamlit (`frontend/`) · pyte
 
 ## Commands
 
-- Backend: `uvicorn backend.api:app --reload`
-- Dashboard: `streamlit run frontend/dashboard.py`
+- Backend: `python -m uvicorn backend.api:app --reload`
+- Dashboard: `python -m streamlit run frontend/dashboard.py` — must be `python -m` (run from the
+  repo root): bare `streamlit run` only puts `frontend/` on `sys.path`, so `import frontend...`
+  fails with `ModuleNotFoundError: No module named 'frontend'`.
+- Both need the venv active (`.venv\Scripts\Activate.ps1`), or use `.venv\Scripts\python.exe` in
+  place of `python`.
 - Tests: `pytest`
 
 ## Conventions

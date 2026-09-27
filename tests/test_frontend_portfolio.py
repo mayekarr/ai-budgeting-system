@@ -72,6 +72,31 @@ def test_portfolio_passes_the_resolved_date_range():
     assert mock_tx.call_args.kwargs == {"date_from": date(2026, 7, 1), "date_to": date(2026, 8, 31)}
 
 
+def test_all_assets_is_the_default_and_combines_every_assets_transactions():
+    p_assets, p_tx = _patched()
+    with p_assets, p_tx as mock_tx:
+        at = _open_portfolio()
+        at.run()
+
+    assert not at.exception
+    assert at.selectbox(key="portfolio_asset_select").value == "All Assets"
+    assert sorted(c.args[0] for c in mock_tx.call_args_list) == [1, 2]
+    combined = at.dataframe[1].value
+    # Newest first across assets, with an Asset column to tell them apart.
+    assert list(combined["Asset"]) == ["Jericho Ct", "Share Portfolio"]
+    assert list(combined["Date"]) == ["2026-08-05", "2026-07-31"]
+
+
+def test_single_asset_view_has_no_asset_column():
+    p_assets, p_tx = _patched()
+    with p_assets, p_tx:
+        at = _open_portfolio()
+        at.run()
+        at.selectbox(key="portfolio_asset_select").select("Jericho Ct").run()
+
+    assert "Asset" not in at.dataframe[1].value.columns
+
+
 def test_selecting_an_asset_shows_its_transactions():
     p_assets, p_tx = _patched()
     with p_assets, p_tx as mock_tx:
@@ -80,7 +105,7 @@ def test_selecting_an_asset_shows_its_transactions():
         at.selectbox(key="portfolio_asset_select").select("Share Portfolio").run()
 
     assert not at.exception
-    assert mock_tx.call_args.args == (2,)
+    assert mock_tx.call_args_list[-1].args == (2,)
     drill_in = at.dataframe[1].value
     assert list(drill_in["Description"]) == ["INTEREST CHARGED FROM A/C 34-189-2465"]
 

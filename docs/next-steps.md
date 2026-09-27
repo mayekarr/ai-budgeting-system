@@ -90,6 +90,18 @@ each one actually matters.
      DB was backed up the same way to the session scratchpad first. **The running backend and
      dashboard still need a restart to load the J6 code** (`/assets` returns 404 until then).
    - ~~Confirm the Barkly Street loan number~~ — **Confirmed** by Rohan 2026-09-27: `703206283`.
+   - **Follow-ups, 2026-09-27, after Rohan's first live look:**
+     - Portfolio's transaction selector gained an **"All Assets"** option (Rohan's request), which is
+       now the default. It combines every asset's transactions, newest first, with an Asset column.
+       It reuses the per-asset endpoint (one cached call per asset) rather than adding a combined
+       endpoint. Tests-first, 271 passing.
+     - Rohan saw an empty page: the default "This Month" (September) has no data, because the
+       statements run from late July to mid-August. Not a bug. Offered to default Portfolio to
+       "Last 12 Months" (asset cash flow is lumpy month to month). **Awaiting Rohan's call.**
+     - Fixed the documented launch commands in `CLAUDE.md` and `docs/demo-feature-list.md`: they
+       must be `python -m streamlit` / `python -m uvicorn`. Bare `streamlit run` only puts
+       `frontend/` on `sys.path`, so every page fails with `No module named 'frontend'`.
+       `scripts/deploy_local.ps1` already used `-m`.
    - **Visual check of the Portfolio page** (`/run`). The behaviour is covered by AppTest; the
      layout hasn't been looked at.
    - Stale `.claude/worktrees/j6-portfolio-assets` directory + `worktree-j6-portfolio-assets`

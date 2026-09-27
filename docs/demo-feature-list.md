@@ -48,7 +48,7 @@ project's standing operating mode, not a temporary gap — plain `uvicorn backen
 3. **Start the backend** (from the project root, with the venv activated):
    ```powershell
    .venv\Scripts\Activate.ps1
-   uvicorn backend.api:app --reload
+   python -m uvicorn backend.api:app --reload
    ```
    Confirm it's up at `http://127.0.0.1:8000/docs`.
    Then, in a second terminal, **set up the assets** (J6, one-time; safe to re-run). This needs
@@ -62,9 +62,11 @@ project's standing operating mode, not a temporary gap — plain `uvicorn backen
 4. **Start the dashboard**, in a second terminal:
    ```powershell
    .venv\Scripts\Activate.ps1
-   streamlit run frontend/dashboard.py
+   python -m streamlit run frontend/dashboard.py
    ```
-   It opens at `http://localhost:8501`.
+   It opens at `http://localhost:8501`. Use `python -m streamlit`, not bare `streamlit`: the bare
+   command doesn't put the project root on the import path, so every page fails with
+   `No module named 'frontend'`.
 5. **Upload the sample statements**, in this order, via the API — the dashboard has no upload
    control yet. Easiest is the interactive docs at `http://127.0.0.1:8000/docs` →
    `POST /transactions/upload` → "Try it out"; or from a terminal in the project root:
