@@ -2,7 +2,7 @@
 
 Status: Draft v9
 Owner: Rohan Mayekar
-Last updated: 2026-09-25
+Last updated: 2026-09-27
 Source: `Project_objectives_raw.md`
 
 Companion document: a separate **Agentic Development Workflow** doc will cover `.claude/` setup,
@@ -290,6 +290,21 @@ derived number. Scoped to ATO tax refunds specifically; other historical `Refund
 per 4.3.2 (see remapping table below) unless the same reasoning is explicitly extended later — e.g.
 Medicare benefits (seen bank-tagged `Refund` in the new AC sample data) are arguably the same kind of
 case, flagged here, not decided.
+**J7 build decisions, 2026-09-27:**
+- **"Year" means the calendar year the refund arrived.** Every real refund in Source 2 (2012–2021)
+  landed between September and December, just after the 30 June financial-year end, and Rohan's own
+  labels follow the same pattern ("ATO - Tax Refunds 2012", received October 2012). So the calendar
+  year received equals the financial year the refund is for. It would only drift for a refund
+  landing January–June (a late or amended return); none have. The alternative, grouping by
+  financial year received, would have filed every refund one year *after* the tax year it relates
+  to, which is exactly backwards for this question.
+- **A plain sum, no netting against "Tax paid to ATO".** Source 2 shows some years where tax was
+  paid instead of refunded (e.g. 2014, 2017, 2018), and a "net tax position" view would include
+  those. That's a different question from the one J7 was designed around (§6: "how much tax refund
+  year on year"), so it isn't built. A possible follow-up, not decided.
+- Years between the first and last refund with none show as **$0**, not skipped.
+- **The current data has no tax refunds** (statements start April 2026). The view becomes useful
+  after J8's backfill.
 
 #### 4.2.1 Decision: historical backfill — DECIDED
 

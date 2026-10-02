@@ -5,7 +5,7 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
-from frontend.api_client import get_summary
+from frontend.api_client import get_summary, get_summary_by_year
 from frontend.categories import category_options
 from frontend.date_ranges import PRESETS, resolve_date_range
 
@@ -22,10 +22,44 @@ if preset == "Custom":
     if isinstance(custom_range, tuple) and len(custom_range) == 2:
         date_from, date_to = custom_range
 
+
+def _render_tax_refund_yoy() -> None:
+    """
+    J7: ATO tax refunds year on year. Deliberately ignores the date range -- year-on-year only
+    means something across every year -- and is rendered even when the monthly summary fails or the
+    range is empty, since it depends on neither. Tax refunds are plain Income (the §4.2
+    exception), so this is a direct sum, no netting.
+    """
+    st.divider()
+    if st.toggle("Tax refund (year on year)", key="overview_tax_refund_yoy"):
+        try:
+            yearly = get_summary_by_year("Income", "Tax Refund")
+        except Exception as exc:  # pylint: disable=broad-except
+            st.error(f"Could not load tax refunds: {exc}")
+        else:
+            if not yearly:
+                st.info(
+                    "No tax refunds recorded yet. Current statements only go back to April 2026; "
+                    "earlier years arrive with the historical backfill (J8)."
+                )
+            else:
+                st.caption("All years, regardless of the date range above. Grouped by the year received.")
+                # Year as text so the chart axis reads "2021", not "2,021".
+                yearly_df = pd.DataFrame(
+                    {
+                        "Year": [str(y["year"]) for y in yearly],
+                        "Tax refund": [y["amount"] for y in yearly],
+                    }
+                )
+                st.bar_chart(yearly_df.set_index("Year")["Tax refund"])
+                st.dataframe(yearly_df, hide_index=True)
+
+
 try:
     summary = get_summary(date_from=date_from, date_to=date_to)
 except Exception as exc:  # pylint: disable=broad-except
     st.error(f"Could not load summary: {exc}")
+    _render_tax_refund_yoy()
     st.stop()
 
 col1, col2, col3 = st.columns(3)
@@ -67,3 +101,5 @@ else:
     st.session_state["drill_in_date_from"] = date_from
     st.session_state["drill_in_date_to"] = date_to
     st.page_link("pages/2_Category_Drill_in.py", label="Go to Category Drill-in →")
+
+_render_tax_refund_yoy()

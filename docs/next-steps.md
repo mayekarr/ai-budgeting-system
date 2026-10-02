@@ -1,7 +1,7 @@
 # Next Steps
 
 Status: Active
-Last updated: 2026-09-25
+Last updated: 2026-09-27
 Companion to: `docs/product-requirements.md` (Draft v9) — read that first for full requirements
 detail; this doc is a resumable to-do list, not a requirements source of truth.
 
@@ -105,10 +105,38 @@ each one actually matters.
        `scripts/deploy_local.ps1` already used `-m`.
    - **Visual check of the Portfolio page** (`/run`). The behaviour is covered by AppTest; the
      layout hasn't been looked at.
-   - Stale `.claude/worktrees/j6-portfolio-assets` directory + `worktree-j6-portfolio-assets`
-     branch from 2026-09-19. No commits beyond `main`, and git no longer tracks it as a worktree.
-     Safe to delete; ask first.
-4. **J7 — Tax refund (YoY).** A filter on top of `GET /summary` + a chip on Overview.
+   - ~~Stale `.claude/worktrees/j6-portfolio-assets` directory + `worktree-j6-portfolio-assets`
+     branch~~ — **Deleted** 2026-09-27 (Rohan's call). Checked first: the branch was fully contained
+     in `main`, and the folder's only difference from its commit was a *missing* file plus an
+     identical copy of `settings.local.json`, so nothing unique was lost. The merged
+     `feature/j6-portfolio-assets` branch was deleted too, after J6 was fast-forwarded into `main`,
+     pushed (`d9fdfe1`) and passed CI. This also ends git's repeated
+     `failed to delete '.git/worktrees/...'` warning.
+4. ~~**J7 — Tax refund (YoY).**~~ — **Done** 2026-09-27. New `GET /summary/by-year?category=&subcategory=`
+   (a separate endpoint rather than a `group_by` option on `/summary`, which would have given one
+   route two response shapes), plus a "Tax refund (year on year)" toggle on Overview. It ignores the
+   date range by design, because year-on-year only means something across every year.
+   **Decided from real data** (details in `docs/product-requirements.md` §4.2): group by the
+   **calendar year received**. Every real refund in Source 2 (2012–2021) landed Sep–Dec, just after
+   the 30 June FY end, and Rohan labels them the same way ("Tax Refunds 2012", received Oct 2012), so
+   that year *is* the tax year. Gap years show as $0. It's a plain sum with no netting against
+   "Tax paid to ATO", which remains a possible "net tax position" follow-up.
+   **Today's data has no tax refunds** (statements start April 2026), so the toggle shows an
+   explanatory message until J8's backfill. Verified live: the tax-refund query returns `[]`, and
+   `category=Income` alone returns 2026 = $61,290.76, matching `/summary`.
+   Tests-first: 271 → **284 passing**. `/code-review medium`: 1 low finding, fixed tests-first. If
+   the monthly `/summary` failed, Overview's `st.stop()` also hid the unrelated tax-refund toggle;
+   it now renders on that error path too.
+4a. **Rohan is gathering 12 months of statements for all 7 accounts** (agreed 2026-10-02):
+   roughly Sep 2025 to now, same export formats, replacing the files in `transaction-files/`. Loan
+   statements are optional (they'd test J6's double-count caveat). Why now: current coverage is thin
+   (JC/RC about 4 weeks, CC/AC about 4 months, MAC from Oct 2025, MACACC from Mar 2026), and a full
+   year (a) should include the FY2024-25 ATO refund (Sep–Nov 2025), J7's first real data point and
+   the first real test of ATO detection; (b) is exactly what item 6 waits on; (c) gives item 5 real
+   formats to build against. **When they arrive:** if any export is `.csv`, widen `.gitignore` first
+   (only `transaction-files/*.xlsx` is ignored today); then rebuild `finance.db` from the full
+   CC/RC/AC/JC year and seed the assets; then build item 5. Expect the review queue to roughly triple
+   (about 50 to about 150 items), which nudges P3 up.
 5. **MAC/MACACC/NBA statement parsers** (README-documented fast-follow — only the NAB-style CC/RC/
    AC/JC formats parse today). Unblocks the full RC→MAC→MACACC transfer chain (§4.1) and should
    supply the missing counterparts for the 7 unlinked `-$5,000 "... Trans salary MAYEKAR A"` AC
@@ -140,6 +168,11 @@ each one actually matters.
     would need their own backup).
 
 **Lower priority / no deadline:**
+- **"Net tax position" per year** (J7 follow-up, not decided). Refunds minus "Tax paid to ATO"
+  payments. Source 2 has payment years (e.g. 2014, 2017, 2018) that the refunds-only view doesn't
+  show. Also: real bank descriptions for ATO refunds haven't been seen yet (none in current
+  statements), so check `transfers/refunds.py`'s `ATO|TAX REFUND` pattern against the first
+  real one.
 - **Account-scoped categorisation rules** (`CategorisationRule.account_id`). Considered in J6's
   design pass and deferred (Rohan's call, 2026-09-25): J6 only tags assets. Build it if text
   patterns keep breaking on a specific account.
@@ -957,7 +990,8 @@ start here" above; it supersedes the ordering of the remaining items (J6–J8) b
       account to whatever represents a loan), so categorisation/reporting can key off account-level
       context instead of purely per-transaction text patterns — not just the Asset entity in
       isolation as originally scoped.
-   7. **J7 — Tax refund (YoY)**. A filter on top of J2's summary endpoint + a chip on Overview.
+   7. ~~**J7 — Tax refund (YoY)**~~ — **Done** 2026-09-27; see "Pending work" item 4 at the top.
+      A filter on top of J2's summary endpoint + a chip on Overview.
    8. **J8 — Historical backfill**. Last, unchanged reasoning: needs the live pipeline proven on
       real imports first, and `backend/api.py` currently imports the discard-verdict
       `ingestion`/`categorisation` modules directly (§8) — those get replaced as part of step 1

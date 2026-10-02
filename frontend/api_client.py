@@ -78,6 +78,14 @@ def get_suggested_transfer_match(transaction_id: int) -> Optional[dict]:
     return _get(f"/transactions/{transaction_id}/suggested-transfer-match")
 
 
+@st.cache_data(ttl=_READ_CACHE_TTL_SECONDS, show_spinner=False)
+def get_summary_by_year(category: str, subcategory: Optional[str] = None) -> list[dict]:
+    params = {"category": category}
+    if subcategory is not None:
+        params["subcategory"] = subcategory
+    return _get("/summary/by-year", params)
+
+
 def _date_params(date_from: Optional[date], date_to: Optional[date]) -> dict:
     params = {}
     if date_from is not None:
@@ -113,6 +121,7 @@ def _patch_transaction(transaction_id: int, payload: dict) -> dict:
         get_suggested_transfer_match.clear()
         get_assets.clear()
         get_asset_transactions.clear()
+        get_summary_by_year.clear()
 
 
 def correct_transaction_category(

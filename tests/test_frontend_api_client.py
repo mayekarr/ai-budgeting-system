@@ -78,6 +78,16 @@ def test_asset_reads_use_the_asset_endpoints(http):
     ]
 
 
+def test_summary_by_year_uses_the_yearly_endpoint(http):
+    fake, _ = http
+
+    api_client.get_summary_by_year("Income", "Tax Refund")
+
+    fake.get.assert_called_once_with(
+        "/summary/by-year", params={"category": "Income", "subcategory": "Tax Refund"}
+    )
+
+
 def test_repeated_identical_reads_are_served_from_cache(http):
     # P2: Streamlit reruns the whole page on every widget click; an unchanged read shouldn't
     # go back to the API each time.
@@ -124,12 +134,13 @@ def test_every_write_invalidates_cached_reads(http, write):
         # its totals, so the Portfolio reads must refresh too.
         api_client.get_assets()
         api_client.get_asset_transactions(1)
+        api_client.get_summary_by_year("Income", "Tax Refund")
 
     read_everything()
     write()
     read_everything()
 
-    assert fake.get.call_count == 10
+    assert fake.get.call_count == 12
 
 
 def test_a_failed_write_still_invalidates_cached_reads(http):

@@ -9,7 +9,7 @@ statement files in `transaction-files/`, not synthetic data.
 
 ## What's built vs. what's coming
 
-**Built and demoable today (J1–J6):**
+**Built and demoable today (J1–J7):**
 
 | Journey | What it does |
 |---|---|
@@ -18,12 +18,12 @@ statement files in `transaction-files/`, not synthetic data.
 | J4 — Correct a miscategorisation | Fix a category/subcategory from Drill-in; the correction is remembered as a rule for future transactions from the same merchant (not retroactive). |
 | J5 — Needs-review queue | One combined, reason-filterable queue for anything uncertain: an unresolved account, an ambiguous refund, or a transfer match that isn't a sure thing — each with a one-click resolution. |
 | J6 — Portfolio/asset view | Portfolio page: income, expense and net per asset (Jericho Ct, Share Portfolio, Barkly Street) and in total, plus each asset's transactions. Loan interest and repayments are tagged by the loan number in the bank's text, so unrelated rows on a shared account stay untagged. One-time setup: `python -m scripts.seed_assets` (see `config/assets.example.json`). |
+| J7 — Tax refund (YoY) | Overview's "Tax refund (year on year)" toggle: ATO refunds summed per year across all years, ignoring the page's date range, with gap years shown as $0. **Shows "No tax refunds recorded yet" on today's data**, since statements start April 2026. It gets its real history (2012–2021 refunds) with J8's backfill. |
 
 **Not built yet — coming next, in this order (see `docs/next-steps.md` for the live-tracked list):**
 
 | Journey | What it'll add |
 |---|---|
-| J7 — Tax refund (YoY) | A filter on top of J2's summary endpoint plus a chip on Overview, for "how much tax refund, year on year." |
 | J8 — Historical backfill | One-time import of the 13-year, ~14,300-row manual `Expense Log` (2012–2025), remapped into the current taxonomy. Deliberately last — needs the live pipeline proven on real imports first. |
 
 Also not built: forecasting and cloud deployment (Phase 2, out of scope for now).
@@ -90,6 +90,8 @@ project's standing operating mode, not a temporary gap — plain `uvicorn backen
    - J5: open the Needs-Review queue, filter by reason, resolve one live (the Arvan/Nando's
      near-match transfer flag below is a good one — it's genuinely ambiguous, not staged).
    - J6: open Portfolio → per-asset net → pick Jericho Ct to show its rent and loan interest.
+   - J7: on Overview, switch on "Tax refund (year on year)". Today it explains that no refunds are
+     in the data yet; say that J8's backfill brings the 2012–2021 history.
 7. **Shut down** when done: `Ctrl+C` in both terminals.
 
 ## J1 — Upload a statement
@@ -235,7 +237,7 @@ the reason why, and one click resolves it."
 - The full 3-account RC→MAC→MACACC transfer chain — depends on the above; only the AC↔JC and JC↔CC
   pairs above are demoable today.
 - Unrecognised-account resolution UI (rename/merge) — flagged for visibility only, no fix-it action.
-- J7/J8 and Phase 2 (forecasting, cloud deployment) — see the table at the top of this doc.
+- J8 and Phase 2 (forecasting, cloud deployment) — see the table at the top of this doc.
 - Dividends aren't tagged to `Share Portfolio` yet: only the share loan's interest is. Tagging them
   needs `AssetAlias` patterns for the holdings, and MAC (where the dividends land) can't be parsed
   yet anyway.

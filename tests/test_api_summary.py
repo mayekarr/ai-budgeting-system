@@ -187,3 +187,86 @@ def test_transactions_drill_in_filters_by_category_and_date_range(client):
 
     assert len(listed) == 1
     assert listed[0]["raw_description"] == "IN RANGE"
+
+
+def _tax_refund(SessionLocal, account_id, d, amount, **overrides):
+    fields = dict(category="Income", subcategory="Tax Refund", type="Income", raw_description="ATO TAX REFUND")
+    fields.update(overrides)
+    return _seed(SessionLocal, account_id, date=d, amount=amount, **fields)
+
+
+def _yearly(api_client, **params):
+    return api_client.get(
+        "/summary/by-year", params={"category": "Income", "subcategory": "Tax Refund", **params}
+    )
+
+
+def test_by_year_sums_tax_refunds_per_calendar_year_received(client):
+    # J7. Real history (Source 2): refunds land Sep-Dec, after the 30 June FY end -- so the calendar
+    # year received is also the FY the refund is for, and matches Rohan's own "Tax Refunds 2012" naming.
+    api_client, SessionLocal, account_id = client
+    _tax_refund(SessionLocal, account_id, date(2018, 10, 22), 2356.82)
+    _tax_refund(SessionLocal, account_id, date(2018, 10, 25), 2689.32)
+    _tax_refund(SessionLocal, account_id, date(2019, 9, 17), 2062.26)
+
+    response = _yearly(api_client)
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {"year": 2018, "amount": pytest.approx(5046.14), "count": 2},
+        {"year": 2019, "amount": pytest.approx(2062.26), "count": 1},
+    ]
+
+
+def test_by_year_shows_gap_years_as_zero(client):
+    # A year with no refund is part of the year-on-year story, not a missing bar.
+    api_client, SessionLocal, account_id = client
+    _tax_refund(SessionLocal, account_id, date(2019, 9, 17), 100.0)
+    _tax_refund(SessionLocal, account_id, date(2021, 9, 30), 300.0)
+
+    years = _yearly(api_client).json()
+
+    assert [(y["year"], y["amount"], y["count"]) for y in years] == [
+        (2019, 100.0, 1), (2020, 0.0, 0), (2021, 300.0, 1),
+    ]
+
+
+def test_by_year_only_counts_the_requested_subcategory(client):
+    api_client, SessionLocal, account_id = client
+    _tax_refund(SessionLocal, account_id, date(2020, 12, 8), 865.67)
+    _seed(SessionLocal, account_id, date=date(2020, 12, 1), amount=5000.0, category="Income",
+          subcategory="Salary", type="Income")
+    _seed(SessionLocal, account_id, date=date(2020, 11, 1), amount=-899.75, category="Government & Tax",
+          subcategory="Tax Paid")
+
+    assert _yearly(api_client).json() == [{"year": 2020, "amount": pytest.approx(865.67), "count": 1}]
+
+
+def test_by_year_excludes_transfers_and_superseded_rows(client):
+    api_client, SessionLocal, account_id = client
+    kept = _tax_refund(SessionLocal, account_id, date(2021, 9, 30), 9402.36)
+    _tax_refund(SessionLocal, account_id, date(2021, 9, 30), 9402.36, type="Transfer")
+    _tax_refund(SessionLocal, account_id, date(2021, 9, 29), 9402.36, superseded_by_id=kept)
+
+    assert _yearly(api_client).json() == [{"year": 2021, "amount": pytest.approx(9402.36), "count": 1}]
+
+
+def test_by_year_with_no_matching_rows_is_empty(client):
+    api_client, _, _ = client
+    assert _yearly(api_client).json() == []
+
+
+def test_by_year_category_only_groups_the_whole_category(client):
+    api_client, SessionLocal, account_id = client
+    _tax_refund(SessionLocal, account_id, date(2020, 12, 8), 865.67)
+    _seed(SessionLocal, account_id, date=date(2020, 12, 1), amount=5000.0, category="Income",
+          subcategory="Salary", type="Income")
+
+    response = api_client.get("/summary/by-year", params={"category": "Income"})
+
+    assert response.json() == [{"year": 2020, "amount": pytest.approx(5865.67), "count": 2}]
+
+
+def test_by_year_requires_a_category(client):
+    api_client, _, _ = client
+    assert api_client.get("/summary/by-year").status_code == 422

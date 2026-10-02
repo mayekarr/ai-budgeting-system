@@ -1,7 +1,7 @@
 # Design Phase: Data Model, API & Categorisation Rules
 
 Status: Active
-Last updated: 2026-09-25
+Last updated: 2026-09-27
 Companion to: `docs/design-journeys.md` (the storyboard this design is derived from — read that
 first), `docs/product-requirements.md` (requirements/decisions), and `docs/next-steps.md`.
 This doc serves J1, J4, J5 (rule-learning half), J6, J7, J8 — see `docs/design-journeys.md` for the
@@ -94,6 +94,7 @@ Replaces `backend/api.py`'s 3 endpoints; keeps its FastAPI/CORS/dependency-injec
 | `PATCH /transactions/{id}` | Category correction; also settable: `is_refund`, `transfer_group_id`, for resolving review-queue items | J4, J5 |
 | `GET /transactions/needs-review` | The review queue (low-confidence categorisation *and* low-confidence transfer/refund matches) | J5 |
 | `GET /summary` | Income vs. expense over a period, excluding `Transfer`, net of refunds except the `Income`-classified ATO exception | J2, J7 |
+| `GET /summary/by-year?category=&subcategory=` | **Added 2026-09-27 (J7, built).** Year-on-year totals `[{year, amount, count}]` for one category (optionally one subcategory), with the same Transfer/superseded exclusions and no netting. It's grouped by calendar year received, with gap years as 0. This is a separate endpoint rather than the originally sketched `group_by=year` option on `GET /summary`, which would have given one route two response shapes. | J7 |
 | `GET /assets` / `GET /assets/{id}/transactions` | Portfolio view / single-asset drill-in | J6 |
 | `POST /backfill/expense-log` | One-time historical import, applies the §4.2.1 remapping table, routes flagged items to the review queue | J8 |
 

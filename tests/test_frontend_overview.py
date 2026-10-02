@@ -153,3 +153,77 @@ def test_overview_shows_info_when_no_transactions_in_range():
 
     assert not at.exception
     assert any("No transactions" in i.value for i in at.info)
+
+
+def _fake_tax_refunds(*args, **kwargs):
+    return [
+        {"year": 2019, "amount": 5453.14, "count": 2},
+        {"year": 2020, "amount": 5105.77, "count": 2},
+        {"year": 2021, "amount": 15574.33, "count": 2},
+    ]
+
+
+def test_tax_refund_view_is_off_by_default_and_not_fetched():
+    with patch("frontend.api_client.get_summary", side_effect=_fake_summary), \
+            patch("frontend.api_client.get_summary_by_year", side_effect=_fake_tax_refunds) as mock_yearly:
+        at = _open_overview()
+        at.run()
+
+    assert not at.exception
+    assert at.toggle(key="overview_tax_refund_yoy").value is False
+    mock_yearly.assert_not_called()
+
+
+def test_tax_refund_toggle_shows_yearly_totals_across_all_years():
+    # J7: year-on-year means every year, so the query ignores the page's date range.
+    with patch("frontend.api_client.get_summary", side_effect=_fake_summary), \
+            patch("frontend.api_client.get_summary_by_year", side_effect=_fake_tax_refunds) as mock_yearly:
+        at = _open_overview()
+        at.run()
+        at.toggle(key="overview_tax_refund_yoy").set_value(True).run()
+
+    assert not at.exception
+    mock_yearly.assert_called_once_with("Income", "Tax Refund")
+    table = at.dataframe[0].value
+    assert list(table["Year"]) == ["2019", "2020", "2021"]
+    assert list(table["Tax refund"]) == [5453.14, 5105.77, 15574.33]
+
+
+def test_tax_refund_toggle_with_no_refunds_explains_why():
+    with patch("frontend.api_client.get_summary", side_effect=_fake_summary), \
+            patch("frontend.api_client.get_summary_by_year", return_value=[]):
+        at = _open_overview()
+        at.run()
+        at.toggle(key="overview_tax_refund_yoy").set_value(True).run()
+
+    assert not at.exception
+    assert any("No tax refunds" in i.value for i in at.info)
+
+
+def test_tax_refund_fetch_failure_shows_error_but_keeps_the_page():
+    def _boom(*args, **kwargs):
+        raise RuntimeError("backend down")
+
+    with patch("frontend.api_client.get_summary", side_effect=_fake_summary), \
+            patch("frontend.api_client.get_summary_by_year", side_effect=_boom):
+        at = _open_overview()
+        at.run()
+        at.toggle(key="overview_tax_refund_yoy").set_value(True).run()
+
+    assert any("backend down" in e.value for e in at.error)
+    assert at.metric[0].value == "$5,000.00"  # the rest of Overview still rendered
+
+
+def test_tax_refund_view_still_works_when_the_monthly_summary_fails():
+    # The yearly view doesn't depend on GET /summary, so a failure there mustn't hide it.
+    def _boom(*args, **kwargs):
+        raise RuntimeError("summary down")
+
+    with patch("frontend.api_client.get_summary", side_effect=_boom), \
+            patch("frontend.api_client.get_summary_by_year", side_effect=_fake_tax_refunds):
+        at = _open_overview()
+        at.run()
+        at.toggle(key="overview_tax_refund_yoy").set_value(True).run()
+
+    assert any("summary down" in e.value for e in at.error)
+    assert list(at.dataframe[0].value["Year"]) == ["2019", "2020", "2021"]

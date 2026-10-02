@@ -131,6 +131,12 @@ class SummaryOut(BaseModel):
     by_income_category: List[CategorySummary]
 
 
+class YearTotal(BaseModel):
+    year: int
+    amount: float
+    count: int
+
+
 class AssetCashFlowOut(BaseModel):
     id: int
     name: str
@@ -677,6 +683,42 @@ def get_summary(
         by_category=by_category,
         by_income_category=by_income_category,
     )
+
+
+@app.get("/summary/by-year", response_model=List[YearTotal])
+def get_summary_by_year(
+    db: Session = Depends(get_session),
+    category: str = Query(...),
+    subcategory: Optional[str] = Query(default=None),
+) -> List[YearTotal]:
+    """
+    Year-on-year totals for one category (optionally one subcategory), e.g. J7's ATO tax refunds.
+    Same Transfer/superseded exclusions as GET /summary; amounts are raw sums (no netting).
+
+    Grouped by the calendar year the money arrived. For tax refunds that's also the financial year
+    they relate to: every real refund in Rohan's history landed Sep-Dec, just after the 30 June FY
+    end. Years between the first and last with nothing show as zero rather than being skipped.
+    """
+    q = db.query(Transaction).filter(
+        Transaction.type != "Transfer",
+        Transaction.superseded_by_id.is_(None),
+        Transaction.category == category,
+    )
+    if subcategory is not None:
+        q = q.filter(Transaction.subcategory == subcategory)
+
+    amounts: dict[int, float] = {}
+    counts: dict[int, int] = {}
+    for tx in q.all():
+        year = tx.date.year
+        amounts[year] = amounts.get(year, 0.0) + tx.amount
+        counts[year] = counts.get(year, 0) + 1
+    if not amounts:
+        return []
+    return [
+        YearTotal(year=year, amount=amounts.get(year, 0.0), count=counts.get(year, 0))
+        for year in range(min(amounts), max(amounts) + 1)
+    ]
 
 
 @app.get("/assets", response_model=AssetsOut)
