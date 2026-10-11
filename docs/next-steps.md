@@ -1,7 +1,7 @@
 # Next Steps
 
 Status: Active
-Last updated: 2026-09-27
+Last updated: 2026-10-11
 Companion to: `docs/product-requirements.md` (Draft v9) — read that first for full requirements
 detail; this doc is a resumable to-do list, not a requirements source of truth.
 
@@ -34,6 +34,31 @@ each item lives further down this doc (and in `docs/product-requirements.md`); t
 index. Performance items P1–P5 come from a measured review on 2026-09-25 (Rohan reported the app
 feeling slow) — kept in their recommended relative order, interleaved with the journey work by when
 each one actually matters.
+
+**Next session — start here (agreed 2026-10-11).** Three jobs, in this order, all tests-first
+under the `tdd-workflow` skill; the evidence and decisions behind them are inside item 4b below
+and in `docs/product-requirements.md` FR-9f to FR-9k.
+1. **Fix the CC export repeats in the importer.** Every CC export from the bank repeats a 90-row
+   block at each 1,000-row page seam (dates jump backward at rows 2000/3000/4000/5000/6000).
+   Confirmed fake against the bank's own statement. Drop a row that exactly matches another about
+   90 rows away across a seam; keep genuine same-day repeat purchases (1–8 rows apart).
+   **Apply it to every account's upload, not just CC.** Checked 2026-10-11: the fault needs a file
+   over 1,000 rows, so only CC (7,000) and JC (1,883) could have it, and JC shows no backward date
+   jumps; a DB scan of RC/AC/JC found no identical same-day rows. But AC (987 rows) and RC (923)
+   are close to the limit, so their next export will likely repeat blocks too. Add a test with an
+   AC- or RC-shaped file that crosses 1,000 rows.
+2. **Rebuild the CC data from `transaction-files/BankTransactions - long - CC - 1.xlsx`** (the
+   fresh export to 2026-10-11) and drop the old `CC.xlsx`, which has changed since it was
+   analysed. Then **re-add the two manual Ramesh credits** (RC `Income`/`Other`, +$1,000 each on
+   2020-04-01 and 2020-04-15), which a rebuild erases. Ask Rohan first whether to rebuild the whole
+   DB or only replace the CC rows. Merge the four CC identifiers (cards 7128/2957/3839 and
+   `453030xxxxxx7128`) into **one** `CC` account with four aliases while doing it.
+3. **Build item 4b** (loan seeding, dash-insensitive aliases, drawdown/redraw/paydown →
+   `Transfer`, property sale/purchase tags, and the per-transaction tag script for the one-offs in
+   FR-9j/FR-9k). Then re-check Income and Expense totals against the figures in item 4b.
+Also pending, smaller: the CC export has a 7,000-row cap that may cut off the oldest history;
+the RC +$3,000 from NBA stays unpaired until item 5; get an Anthropic API key (clears about 1,284
+review rows).
 
 1. ~~**P1 — Reuse one HTTP client in the dashboard**~~ — **Done** 2026-09-25. Root cause of the
    slowness: every `httpx.get(...)`/`httpx.patch(...)` call built a brand-new client, costing
@@ -137,6 +162,188 @@ each one actually matters.
    (only `transaction-files/*.xlsx` is ignored today); then rebuild `finance.db` from the full
    CC/RC/AC/JC year and seed the assets; then build item 5. Expect the review queue to roughly triple
    (about 50 to about 150 items), which nudges P3 up.
+   **Arrived 2026-10-03** (Rohan): `transaction-files/BankTransactions - long - <ACCT>.xlsx` for all 7
+   accounts. Coverage: CC 7,000 rows (2020-02 → 2026-10-03); JC 1,883, AC 987, RC 923 (all
+   2019-10 → 2026-09); NBA 212 (2024-10 →); MAC 94 (2025-10 →); MACACC 24 (2026-03 →). All `.xlsx`,
+   so no `.gitignore` widening was needed for format. CC/AC/JC/RC have the NAB-style headers plus
+   the bank's `Category`/`Merchant Name`; MAC/MACACC are Macquarie-style (Debit/Credit columns);
+   NBA is headerless (date, amount, description, balance).
+   **Decided 2026-10-03:** the long files supersede the old short ones. The seven short files were
+   moved to `transaction-files/archive/` (kept, not deleted — real data, and dedup makes keeping
+   them harmless), and `.gitignore` now covers `transaction-files/**/*.xlsx` (the old
+   `transaction-files/*.xlsx` only matched the top level, so a subfolder would have been committable).
+   **Correction to an earlier plan note:** the "uploads 500 without an API key" problem recorded on
+   2026-09-25 is already fixed — `claude_fallback.py` returns `llm_unavailable` / `needs_review`
+   instead of raising, and the bank's own `Category` is used as a second line before the LLM. No
+   code change needed.
+   **Done 2026-10-03: `finance.db` rebuilt** from the long CC → RC → AC → JC files after seeding the
+   assets (Rohan moved the old DB aside; it now lives in the gitignored `db-backups/` as
+   `finance-2026-09-27-422rows.db`). 10,793 rows in ~80s (CC 7,000 rows = 40s). Result: 7,971
+   Expense / 804 Income / 2,018 Transfer (985 transfer groups), 0 superseded. **1,596 rows need
+   review**: 1,284 `llm_unavailable` (no API key — expected), 257 `transfer_match`, 48
+   `refund_ambiguity`, 7 `unrecognised_account`. J7 now has real data: ATO tax refunds detected
+   for 2020–2025 (2025 = 3 rows, $22,772.35 — worth eyeballing).
+   **Found, not fixed — loan proceeds counted as Income:** Jericho Ct carries a single
+   `LOAN PROCEEDS FROM A/C 34-188-5257` credit of **$900,000** (2025-09-08), typed `Income`, so it
+   inflates Income totals and Jericho Ct's asset cash flow (+$913,843 for 2025). Same family as the
+   J6 loan-statement caveat. **Decided** 2026-10-03 (Rohan): loan drawdowns/redraws become
+   `Transfer` — recorded as FR-9f in `docs/product-requirements.md` §4.3.3. Built in item 4b below.
+4b. **Closed-loan handling + loan drawdowns as Transfer** (found 2026-10-03, to pick up next
+   session; **waiting on Rohan** to say what each old loan was). Findings: JC (`147912573`) debits
+   and credits reference 9 loan accounts; only 3 are seeded (Jericho Ct `34-188-5257`, Share
+   portfolio `34-189-2465`, Barkly Street `703206283`). Unseeded, apparently closed or inactive
+   (all appear on JC):
+
+   | Loan reference | Activity | Total | Notes |
+   |---|---|---|---|
+   | `157519740` | instalments 2020-08 → 2024-02 (79) | −$113,948 | Same number as `15-751-9740` (interest charged 2019-10 → 2020-07, −$20,962): likely one loan that went interest-only → principal+interest in 2020-08. |
+   | `399825273` | instalments 2019-10 → 2024-04 (55) | −$79,117 | |
+   | `399755906` | instalments 2019-10 → 2024-04 (55) | −$64,598 | |
+   | `399934242` | instalments 2019-10 → 2024-01 (52) | −$12,065 | |
+   | `91-243-0310` | interest charged 2024-04 → 2025-08 (17) | −$77,511 | Probably the same loan as `912420382`, but the digits differ — unconfirmed. |
+   | `912420382` | repayments 2024-05 → 2025-08 (16) | −$45,052 | |
+   | `703219965` | repayments 2022-06 → 2023-02 (9) | −$3,878 | Starts the same day as Barkly's repayments: maybe a split/sub-account of Barkly. |
+
+   **Matching bug found:** `70-320-6283` ("REDRAW PROCEEDS FROM A/C 70-320-6283", 3 credits,
+   +$72,587, 2024) is the Barkly loan written with dashes, but the seeded alias is the undashed
+   `703206283`, so those rows are untagged and typed `Income`. Alias matching must be
+   dash-insensitive.
+   **Proposed plan (tests-first, once Rohan has described the old loans):**
+   1. Seed each old loan as a `Loan` account with its number as an alias (existing J6 mechanism, via
+      `config/assets.local.json` + `python -m scripts.seed_assets`); a closed loan needs no special
+      treatment beyond that.
+   2. Link each to the asset it financed; add a new asset if it financed something no longer owned
+      (or leave unlinked for e.g. a car/personal loan).
+   3. Dash-insensitive alias matching.
+   4. Loan drawdown/redraw credits (`LOAN PROCEEDS` / `REDRAW PROCEEDS`) → `Transfer` (FR-9f);
+      confirm the Share portfolio loan's $63,014 credit on 2025-09-08 is the same kind.
+   5. Optional, display only: mark a loan closed with an end date.
+   **Questions for Rohan:** for each reference — home vs investment loan, which property/asset,
+   which references are the same loan, any with no asset? Then re-run the backfill (or re-tag in
+   place) and check totals: Income should drop by about $1.04M of drawdowns.
+   **Update 2026-10-03:** the refinance hypothesis further down was wrong (it was a restructure,
+   not a payout of old loans); the correction and data findings below supersede it. Whether the
+   $63,014.45 credit is a `Transfer` like the $900,000 is therefore open.
+   **Rohan's answers, 2026-10-03** (loans were restructured over time for different financial
+   strategies, so one property can have several loans, sequentially or at once):
+   - `157519740` (and its earlier interest-only form `15-751-9740`) → **Mt Alexander Rd, Essendon**.
+   - `399825273` (variable rate) and `399755906` (fixed rate) → **Hillside Crescent, Blackburn**.
+   - `912420382` (repayments 2024-05 → 2025-08) → **Hillside Crescent, Blackburn** too.
+   - `91-243-0310` (interest 2024-04 → 2025-08) → **Jericho Ct**. So it is **not** the same loan as
+     `912420382` (that was my guess; wrong). It is the older Jericho Ct loan that preceded
+     `34-188-5257`.
+   - `703219965` → **Barkly Street**; the loan was deliberately structured as a split, so it is a
+     second loan on the same asset.
+   - **Still unanswered: `399934242`** (instalments 2019-10 → 2024-01, 52 payments, −$12,065 —
+     the smallest and the only one not covered).
+   - `399934242` → **Share portfolio** loan (an older one; instalments ended 2024-01).
+   - **Mt Alexander Rd and Hillside Crescent are sold and their loans closed.** Hillside sold
+     (settled) **Aug 2025**; Rohan said only a few sale proceeds came to JC.
+   - **Corrected 2026-10-03, replacing Rohan's earlier statement** (that the Shares loan was a new
+     $800,000 loan "with proceeds coming to JC"): at the Hillside sale the loans were
+     **restructured** into the three that exist today — **Jericho Ct $900,000 (interest-only)**,
+     **Share portfolio $800,000 (interest-only)** and **Barkly Street (principal & interest, so its
+     balance falls while the other two stay flat and just accrue interest)**.
+   **What the JC data shows around the restructure (checked 2026-10-03; not yet reconciled with
+   the corrected account above — ask Rohan):**
+   - 2025-08-27 credits to JC: $116,313.34 (`RETA NATIONAL AUSTRAL`, probably the loan/bank side of
+     the sale), $65,600 (`Jellis Craig WEGS SALES TRUST`, the agent's trust account) and $1,069
+     (`Jellis Craig` refund). All three are typed `Income`.
+   - 2025-09-02: **−$582,076 `JC to Barkly HL`**, typed `Expense` — a lump-sum paydown of the Barkly
+     loan, not spending.
+   - 2025-09-08: `LOAN PROCEEDS FROM A/C 34-188-5257` **+$900,000** and `…34-189-2465`
+     **+$63,014.45** credited to JC. **Discrepancy:** only $63,014 came from the Share loan, not
+     $800,000 — so the $800,000 is presumably the restructured *balance*, with only a $63k cash
+     difference reaching JC. The Jericho $900,000 did arrive in JC as cash (JC balance goes from
+     about $50k to about $1.01M that day). Both are `Income` today.
+   - After that, roughly $100k a time goes JC → Macquarie (2025-10-07/08, 11-20, 12-10, 2026-03-04/05)
+     and $527,000 JC → RC (2025-11-03). The `JC to Macquarie` debits are typed `Expense` only
+     because the MAC statement isn't parsed yet (item 5); they should pair up as `Transfer` once it is.
+   - **Other large one-off capital movements typed as Expense/Income, found in the same query**
+     (need a decision on how capital events — property purchase/sale, loan paydown — are treated, or
+     totals stay distorted): 2022-04-11 −$147,000 DEFT payment, 2022-04-19 +$284,903.24 `MLC MKIS
+     CREDITS`, 2022-05-24 −$209,404.48 `SETTLEMENT SHORTFALL` (looks like a property settlement,
+     probably Barkly); 2023-03-20 −$98,149.28 `JC to 99K`; 2023-11-09 −$39,947.45 `Paying inv loan`;
+     2024-03-22 −$83,900 BPAY; 2024-04-23 −$33,900 `JC to Barkly HL`; and on 2024-11-06 eight
+     `…MAINTENANCE` credits of $35–37k each (about $287k, typed `Income`) alongside a
+     $143,612 `AC 2 JC India sale` transfer.
+   **Decided 2026-10-03 (Rohan, after the data findings above)** — full reasoning in
+   `docs/product-requirements.md` §4.3.3, FR-9f to FR-9i. Not yet built:
+   1. Loan drawdowns/redraws → `Transfer`, including the $63,014.45 (FR-9f). The "$800,000 vs
+      $63k" Shares discrepancy is dropped: the bank's internal payout never touched JC.
+   2. Property sale proceeds → `Income` / `Property Sale Proceeds` (FR-9g).
+   3. Property purchase/settlement → `Expense` / `Property Purchase` (FR-9h).
+   4. Lump-sum paydowns to an own loan account (e.g. `JC to Barkly HL`) → `Transfer`; regular
+      instalments and interest stay `Expense` (FR-9i).
+   5. **Decided 2026-10-11 (Rohan), not yet built:**
+      - The eight 2024-11-06 `…MAINTENANCE` credits (4 on RC `133500607` = $143,612.35, 4 on AC
+        `147912186` = $143,612.34; $287,224.69 total) are the **India property sale proceeds** (the
+        bank labels them oddly) → `Income` / `Property Sale Proceeds` (FR-9g). No loan financed that
+        property. The RC→JC `Linked Acc Trns` and AC→JC `India sale` moves of the same amounts are
+        already correctly paired `Transfer`s, so the proceeds are counted once.
+      - 2023-03-20 `JC to 99K` (−$98,149.28) was a payment to the old Barkly Street loan before its
+        restructure → `Transfer` (FR-9i). It has no counterpart row in any statement (the loan
+        isn't seeded), so it needs a rule or an alias, not transfer pairing. The same-day
+        `For offset 99K` $1,000 JC→RC leg is a normal paired `Transfer`.
+      - **Answered by Rohan 2026-10-11** (full list in `docs/product-requirements.md` FR-9j): DEFT
+        −$147,000 and `SETTLEMENT SHORTFALL` −$209,404.48 → Barkly purchase (`Property Purchase`);
+        `MLC MKIS CREDITS` +$284,903.24 → MLC share-sale proceeds, `Income`/investment earnings;
+        `Paying inv loan` −$39,947.45 → closing the share portfolio; BPAY `TEAM EVIEW P L` −$83,900
+        → Jericho Ct deposit (`Property Purchase`); `RETA NATIONAL AUSTRAL` +$116,313.34 and `Jellis
+        Craig WEGS SALES TRUST` +$65,600 → Hillside sale proceeds. **Confirmed 2026-10-11:** the MLC
+        credit gets a new `Investment Sale Proceeds` subcategory under `Income`, and `Paying inv loan`
+        was a loan payoff (`Transfer`).
+      - **Build mechanism not yet chosen:** one-off rows can't be tagged by pattern, so the likely
+        route is a `scripts/` one-off that applies per-transaction corrections (rule keyed to the
+        exact description, as J4 does) and survives a `finance.db` rebuild.
+      - **Second batch decided 2026-10-11** (full list: `docs/product-requirements.md` FR-9k):
+        trauma payouts → `Income`/`Other`; extra super contributions, `for MLC` card top-ups and
+        Macquarie rows → `Transfer`; Waverley BMW deposit/refund net out; family loans/repayments
+        kept as records; four CC identifiers → **one** `CC` account with four aliases (card 3839 is
+        an old closed card); RC +$3,000 on 2026-09-30 is from NBA, so it stays unpaired until
+        item 5.
+      - **Found 2026-10-11, not fixed — duplicated rows in the CC export.** The raw file repeats
+        five 90-row blocks at the 1,000-row chunk seams (file rows 2000/3000/4000/5000/6000), so
+        442 rows are double counted ($37,513 of debits, $36,352 of credits, net −$1,161.58 in the
+        card balance). Details and the proposed ingestion fix are in FR-9k. **To do (tests-first):**
+        detect and drop seam repeats on upload, then remove the 442 rows from `finance.db`.
+        **Confirm first:** Rohan checked the real balance (−$14,558.67 = the file's top balance),
+        but that doesn't tell the two stories apart (see FR-9k). Decisive test: compare one CC
+        statement month containing a repeated block (e.g. Jan 2024) with the bank's own statement.
+        **Update, later 2026-10-11 — confirmed fake:** Rohan checked the bank: the MLC premium and
+        the 2024-12-20 `BENEVITY` −$55 each appear once. Rohan then re-exported CC as
+        `transaction-files/BankTransactions - long - CC - 1.xlsx` (2020-02-17 → 2026-10-11, top
+        balance −$6,010.91). **The fresh export has the same fault**: dates jump backward at rows
+        2000/3000/4000/5000/6000 and 452 rows repeat 92 rows apart, so it comes from the export
+        tool's 1,000-row paging, not from hand-stitching. Both CC files are exactly **7,000 rows**,
+        which looks like an export cap, so the oldest history may be cut off too. The original
+        `CC.xlsx` on disk no longer matches what was analysed earlier (it now has no seam jumps and
+        only 33 same-key pairs; the `finance.db` rows were built from the earlier version), so
+        treat it as changed and don't rely on it. The other long files (AC 987, JC 1,883 rows) show
+        no backward date jumps; RC (923), NBA (212), MAC (94) and MACACC (24) are under the
+        1,000-row page size so can't have a seam. The importer fix is still needed because every
+        future CC export will repeat blocks. The other long files (AC, JC, RC, MAC…) may have the same fault and weren't
+        checked: **run the same seam check on all of them** before trusting their totals.
+      - **Done 2026-10-11 (manual):** the two missing Ramesh repayments (+$1,000 on 2020-04-01 and
+        2020-04-15) were inserted into `finance.db` as RC `Income` / `Other` rows with
+        `source='manual'` (ids 10794, 10795). The DB was backed up to the session scratchpad first
+        (not durable). A rebuild loses them.
+      - Follows existing rules, no question: 2024-04-23 and 2025-09-02 `JC to Barkly HL`, 2024-10-07
+        `REDRAW PROCEEDS FROM A/C 70-320-6283` +$47,000 (the dash-matching bug) → `Transfer`; the
+        100k `JC/AC to Macquarie` moves become `Transfer` once item 5 parses MAC. **Follow-up, undecided:** Overview shows property
+      sale proceeds separately so they don't swamp salary.
+   **Consequences for the plan:** two new assets are needed — Mt Alexander Rd (Essendon) and
+   Hillside Crescent (Blackburn) — and the asset list was 3, so the J6 Portfolio page will grow to
+   5+. Still to ask: are those two properties sold (their loans ended 2024-02/2024-04 and
+   2025-08, which hints so)? The asset type (property) and whether any sale/purchase proceeds exist
+   in the data. **Hypothesis to confirm:** Jericho Ct's `91-243-0310` interest and Hillside's
+   `912420382` repayments both stop in late Aug 2025 and the new Jericho Ct / Share portfolio loans
+   start 2025-09-08, so the $900,000 and ~$63,014 credits look like a **refinance** that paid out
+   the old loans. If so, the payout side isn't visible on JC and the credits are correctly
+   `Transfer`.
+   **TODO later (Rohan, 2026-10-03): the Anthropic API key.** There's no `ANTHROPIC_API_KEY`, so the
+   LLM fallback never runs and every rule/bank-category miss lands in Needs Review. With ~8,800
+   NAB-style rows expect the queue to be large. Revisit once a console.anthropic.com key exists.
 5. **MAC/MACACC/NBA statement parsers** (README-documented fast-follow — only the NAB-style CC/RC/
    AC/JC formats parse today). Unblocks the full RC→MAC→MACACC transfer chain (§4.1) and should
    supply the missing counterparts for the 7 unlinked `-$5,000 "... Trans salary MAYEKAR A"` AC

@@ -440,6 +440,114 @@ are treated. Everything below applies to refunds generally, tax refunds excepted
      lower-confidence matches are flagged for user review (same pattern as FR-10).
 - Exact matching tolerance (date window, amount tolerance for fees/rounding) is a design-phase
   concern, not fixed here.
+- FR-9f (**Decided** 2026-10-03, Rohan's call; **not yet built**): a loan **drawdown or redraw** —
+  a credit from a loan account (`LOAN PROCEEDS FROM A/C …`, `REDRAW PROCEEDS FROM A/C …`) — is a
+  `Transfer`, not `Income`. Why: it's the user's own borrowed money moving between their own
+  accounts, not earnings. Found when the 2026-10-03 backfill typed a single $900,000 Jericho Ct
+  drawdown (2025-09-08) as `Income`, inflating income totals and the asset's cash flow. Known
+  instances in the real data: $900,000 (Jericho Ct), about $63,014 (Share portfolio loan, same
+  day) and 3 redraws totalling +$72,587 (Barkly Street, 2024). Loan *repayments and interest* are
+  unchanged: still `Expense`, per J6's cash-flow definition.
+  **Update 2026-10-03:** the Share portfolio loan's +$63,014.45 credit is a drawdown too, so
+  `Transfer`. Why it isn't $800,000: the Aug 2025 Hillside sale led to a restructure into Jericho
+  Ct ($900,000), Share portfolio ($800,000) and Barkly Street, and the bank's internal payout of
+  the old share loans never touched JC — so there is nothing in the data to reconcile (Rohan,
+  2026-10-03). Not worth chasing.
+- FR-9g (**Decided** 2026-10-03, Rohan's call; **not yet built**): **property sale proceeds** are
+  `Income` with subcategory `Property Sale Proceeds` — the same pattern as ATO `Tax Refund`, so
+  "how much did we receive from sales" is a direct filter. Why not a `Transfer`: unlike a drawdown,
+  a sale is real money coming in from outside. Caveat, so a one-off doesn't swamp salary in the
+  period it lands (the Hillside sale credits were about $183k; the India sale is larger): the
+  Overview should be able to show these separately (a toggle or its own line). That display work
+  is a follow-up, not decided or built.
+- FR-9h (**Decided** 2026-10-03, not yet built): a **property purchase or settlement** (e.g. the
+  2022 `DEFT` payment and `SETTLEMENT SHORTFALL`) is an `Expense` with subcategory `Property
+  Purchase` — the mirror of FR-9g, so income shows the sale and expenses show the purchase.
+- FR-9i (**Decided** 2026-10-03, not yet built): a **lump-sum paydown to one of the user's own loan
+  accounts** (e.g. −$582,076 `JC to Barkly HL`, 2025-09-02) is a `Transfer`: per FR-9d both sides
+  are the user's own accounts, and it reduces debt rather than being spending. **Regular
+  instalments and interest stay `Expense`** (J6's cash-flow definition, because they include
+  interest). Why the split: this keeps J6 intact while stopping a one-off paydown from showing as
+  a $582k expense. How to tell a lump sum from an instalment is not designed yet — description
+  patterns (`JC to <loan> HL`, vs `LOAN REPAYMENT/INSTALMENT TO A/C`) look sufficient on the real
+  data but need checking.
+- FR-9j (**Decided** 2026-10-11, Rohan's call; **not yet built**): the remaining 2022–2025 one-offs,
+  tagged individually from Rohan's explanations (a rule can't infer these from the text):
+  - **India property sale** — the eight 2024-11-06 `…MAINTENANCE` credits (RC + AC, $287,224.69)
+    → `Income` / `Property Sale Proceeds` (FR-9g). The bank files them oddly; no loan financed it.
+    The RC/AC → JC moves of the same amounts stay paired `Transfer`s, so nothing is double counted.
+  - **Hillside sale** — 2025-08-27 `RETA NATIONAL AUSTRAL` +$116,313.34 and `Jellis Craig WEGS
+    SALES TRUST` +$65,600 → `Income` / `Property Sale Proceeds`.
+  - **Barkly Street purchase (2022)** — `DEFT` −$147,000 (down payment) and `SETTLEMENT SHORTFALL`
+    −$209,404.48 (**confirmed** by Rohan 2026-10-11 as the Barkly settlement) → `Expense` /
+    `Property Purchase` (FR-9h). `MLC MKIS CREDITS` +$284,903.24
+    (2022-04-19) is the proceeds of selling the MLC shares, used toward that purchase → `Income`
+    as investment earnings; subcategory not chosen yet (existing `Dividends & Distributions` is a
+    poor fit for a sale, so a new `Investment Sale Proceeds` subcategory under `Income` is added —
+    **confirmed** by Rohan 2026-10-11).
+  - **Jericho Ct purchase** — 2024-03-22 BPAY `TEAM EVIEW P L` −$83,900 (deposit) → `Expense` /
+    `Property Purchase`.
+  - **Closing the share portfolio** — 2023-11-09 `Paying inv loan` −$39,947.45 → `Transfer`
+    (FR-9i: a payoff of the user's own loan). **Confirmed** by Rohan 2026-10-11: it was a payoff.
+  - **Old Barkly loan** — 2023-03-20 `JC to 99K` −$98,149.28 → `Transfer` (FR-9i), no counterpart
+    row exists because that loan isn't seeded.
+  Why individually: each is a one-off capital event whose meaning is only in Rohan's head, so each
+  becomes a per-transaction correction (rule keyed to the exact description) rather than a pattern.
+- FR-9k (**Decided** 2026-10-11, Rohan's call; **not yet built**): second batch of per-transaction
+  tags and account facts, from a scan of every remaining unclear row:
+  - **Trauma-insurance payouts** — RC 2025-02-10 and 2025-02-14 `MLC Limited` +$20,000 each (no
+    matching expense) → `Income` / `Other`. They are not refunds, so they must not net against
+    Insurance (clears their `refund_ambiguity` flag).
+  - **Extra super contributions** — `BPAY MLC Super` −$10,000 (2022-06-24) and −$18,587
+    (2024-06-21) → `Transfer` (into the user's own super asset, like FR-9i's loan paydowns).
+  - **MLC insurance premiums** — the annual January `MLC LIMITED DOCKLANDS` charge on the CC
+    (−$5,209.16 on 2023-01-06, −$6,412.96 on 2024-01-10) is `Expense` / `Insurance`. The user
+    pre-funds the card from JC/RC/AC so it stays under its limit (`for MLC` +$6,500, 2024-01-08):
+    that credit is a `Transfer`, and the premium is paid once.
+  - **Waverley BMW** −$5,000 deposit (2025-11) and +$5,000 refund (2025-12) → a refund pair that
+    nets out (FR-9b), not income.
+  - **Macquarie** rows on RC (`Macquarie CM Acc`, `transfer to mac acc`) → `Transfer`.
+  - **Personal loans to family, with repayments** — Ramesh Kambala −$5,000 (2019-12-04) is repaid
+    by four credits ($1,000 on 1 and 15 Apr 2020 — **absent from the RC export**, though Rohan is
+    sure they were credited — then +$1,000 on 2020-04-29 and +$2,000 on 2020-06-10); Sherry
+    −$5,935.08 (2020-11-02, INR 3 lakh) is part-repaid by Valsala Mathew +$5,310 (2021-03-10).
+    Rohan wants these records kept. The remaining 2022–2026 large debits (`Dada tkts visa`,
+    `Trustee Jet Solar`, `TURRELLA`, the India `TT30…` remittances) are plain `Expense`s.
+  - **Credit-card accounts** — `453030xxxxxx7128` is the one CC account. Cards ending 7128 and 2957
+    are two current cards on it; **3839 is an old, closed card on the same account**. Today the
+    importer made four separate accounts (ids 4–7) out of those identifiers, so each got one
+    `unrecognised_account` flag. They should be one `Account` with four aliases; this is the
+    "account rename/merge" backlog item, now with a concrete reason.
+  - **The 2026-09-28/30 rows:** AC −$635.10 → JC is a `Transfer` (already linked); JC +$3,000 from
+    RC is a `Transfer` (already linked); the RC +$3,000 `transfer sydney expe` came from the user's
+    **NBA (CBA) account**, so it is a `Transfer` that stays unpaired until the NBA parser exists
+    (item 5), not `Income`.
+  **Found 2026-10-11 — the CC long export repeats five 90-row blocks (an export-stitching
+  artifact).** At every 1,000-row boundary (file rows 2000, 3000, 4000, 5000, 6000) the file jumps
+  back and re-lists the 90 rows that ended the previous chunk (e.g. row 1999 is 2024-12-20 and row
+  2000 is 2025-01-02, with 2024-12-20 repeated 90 rows later). 442 rows are exact twins: same
+  date, amount, card and description, exactly 90 rows apart. That is $37,513 of debits and $36,352
+  of credits (net −$1,161.58). The twins carry *different* running balances, but every row's
+  balance is consistent with its neighbour, so the balance column was recomputed after stitching
+  and can't tell the copy from the original. That is why the importer's balance-aware dedup keeps
+  both. A further ~43 same-key pairs 1–8 rows apart are genuine same-day repeat purchases and must
+  stay. **Not yet fixed.** A balance check turned out **not to discriminate**: Rohan confirmed
+  the card's real balance on 2026-10-03 is −$14,558.67, which equals the file's top balance. That
+  fits either story, because the balance column is evidently built backward from the latest
+  balance (it stays consistent across the seams, where dates jump backward, which a real bank
+  ledger can't do), so the top matches whether or not the repeats are real. (An earlier version of
+  this entry predicted −$13,397.09; that prediction was wrong.) Evidence the repeats are fake:
+  dates jump backward at exactly the 1,000-row seams; the `for MLC` +$6,500 appears twice on CC but
+  once as a JC debit; Rohan says the premium was paid once. **A decisive check still to do:**
+  compare one CC statement month that contains a repeated block (e.g. Jan 2024) with the bank's
+  own statement. The fix belongs in ingestion, not a one-off DB edit, because J8 and
+  every future upload will hit it: drop a row that exactly matches another 90 rows earlier/later
+  *and* sits at a chunk seam. Existing rows in `finance.db` need removing or marking superseded.
+  Consequence: the 2024-01-10 −$6,412.96 premium is paid once, matching the user's account.
+  **Manual entry, 2026-10-11:** the two Ramesh repayments missing from the RC export were added
+  to `finance.db` by hand as `source='manual'` rows (id 10794: 2020-04-01, id 10795: 2020-04-15;
+  +$1,000 each, account RC, `Income` / `Other`, balance left blank). A `finance.db` rebuild would
+  lose them, so re-add them or keep a manual-entries file.
 
 - FR-11: The system shall provide a web UI showing categorised transactions.
 - FR-12: The dashboard shall show income vs expenses over a selectable time period (excluding
