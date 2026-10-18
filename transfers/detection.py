@@ -200,6 +200,9 @@ def _find_tier2_candidates(session: Session, tx: Transaction) -> list[tuple[Tran
             # it would risk transfer-tagging a row that rollups already exclude, for a real-world
             # charge only the settled row represents.
             Transaction.superseded_by_id.is_(None),
+            # A groupless Transfer is already resolved (a loan drawdown/paydown typed from its
+            # text, transfers/loan_movements.py), so it is never a heuristic partner.
+            Transaction.type != "Transfer",
             # A candidate already linked into some other TransferGroup must not be pulled into a
             # new, unrelated one on pure amount/date coincidence — Tier 2 only ever proposes a
             # link between two rows that are BOTH still unresolved. (`tx` itself is guaranteed

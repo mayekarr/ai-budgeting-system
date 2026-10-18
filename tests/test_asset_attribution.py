@@ -48,6 +48,8 @@ def real_shape(session):
         ("INTEREST CHARGED FROM A/C 34-189-2465", "shares"),
         ("LOAN REPAYMENT TO A/C 703206283 MAYEKAR A", "barkly"),
         ("6 Jericho Ct Berwi The Apostoli Gro Anila Mayekar &", "jericho"),
+        # The same Barkly loan, written with dashes in a redraw line (2026-10-18).
+        ("REDRAW PROCEEDS FROM A/C 70-320-6283", "barkly"),
     ],
 )
 def test_real_jc_rows_are_tagged_to_the_right_asset(session, real_shape, description, expected):

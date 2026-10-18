@@ -585,3 +585,22 @@ def test_tier2_genuine_high_band_tie_is_downgraded_to_medium_not_silently_auto_l
     assert loser.transfer_group_id is None
     assert loser.needs_review is True
     assert loser.needs_review_reason == TRANSFER_MATCH
+
+
+def test_tier2_never_pairs_with_an_already_classified_groupless_transfer(session):
+    # A loan drawdown/paydown is typed Transfer from its text with no group (no counterpart row
+    # exists). It is already resolved, so an unrelated coincidental amount must not pull it in.
+    a = _account(session, "A")
+    b = _account(session, "B")
+    loan_movement = _tx(session, b, date(2026, 8, 5), 100.00, "LOAN PROCEEDS FROM A/C 34-188-5257")
+    loan_movement.type = "Transfer"
+    session.commit()
+    unrelated = _tx(session, a, date(2026, 8, 5), -100.00, "Some unrelated payment")
+
+    process_transfer_detection(session, unrelated)
+
+    session.refresh(unrelated)
+    session.refresh(loan_movement)
+    assert unrelated.type != "Transfer"
+    assert unrelated.transfer_group_id is None
+    assert loan_movement.transfer_group_id is None

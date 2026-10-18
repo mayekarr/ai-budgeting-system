@@ -440,7 +440,7 @@ are treated. Everything below applies to refunds generally, tax refunds excepted
      lower-confidence matches are flagged for user review (same pattern as FR-10).
 - Exact matching tolerance (date window, amount tolerance for fees/rounding) is a design-phase
   concern, not fixed here.
-- FR-9f (**Decided** 2026-10-03, Rohan's call; **not yet built**): a loan **drawdown or redraw** —
+- FR-9f (**Decided** 2026-10-03, Rohan's call; **built 2026-10-18**, `transfers/loan_movements.py`): a loan **drawdown or redraw** —
   a credit from a loan account (`LOAN PROCEEDS FROM A/C …`, `REDRAW PROCEEDS FROM A/C …`) — is a
   `Transfer`, not `Income`. Why: it's the user's own borrowed money moving between their own
   accounts, not earnings. Found when the 2026-10-03 backfill typed a single $900,000 Jericho Ct
@@ -463,7 +463,7 @@ are treated. Everything below applies to refunds generally, tax refunds excepted
 - FR-9h (**Decided** 2026-10-03, not yet built): a **property purchase or settlement** (e.g. the
   2022 `DEFT` payment and `SETTLEMENT SHORTFALL`) is an `Expense` with subcategory `Property
   Purchase` — the mirror of FR-9g, so income shows the sale and expenses show the purchase.
-- FR-9i (**Decided** 2026-10-03, not yet built): a **lump-sum paydown to one of the user's own loan
+- FR-9i (**Decided** 2026-10-03; pattern part **built 2026-10-18** for `… to <name> HL`): a **lump-sum paydown to one of the user's own loan
   accounts** (e.g. −$582,076 `JC to Barkly HL`, 2025-09-02) is a `Transfer`: per FR-9d both sides
   are the user's own accounts, and it reduces debt rather than being spending. **Regular
   instalments and interest stay `Expense`** (J6's cash-flow definition, because they include

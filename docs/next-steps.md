@@ -133,7 +133,41 @@ and in `docs/product-requirements.md` FR-9f to FR-9k.
    2020-04-01 and 2020-04-15), which a rebuild erases. Ask Rohan first whether to rebuild the whole
    DB or only replace the CC rows. Merge the four CC identifiers (cards 7128/2957/3839 and
    `453030xxxxxx7128`) into **one** `CC` account with four aliases while doing it.
-3. **Build item 4b** (loan seeding, dash-insensitive aliases, drawdown/redraw/paydown →
+3. **Build item 4b** — **Part A done 2026-10-18** (see below); Parts B (seed old loans + 2 new
+   assets), C (per-transaction one-off tags, local gitignored JSON), D (re-check totals) still to do.
+   **Part A, built tests-first (347 passing, two `/code-review` rounds done, not yet committed):** (1) alias matching is
+   now dash-insensitive for account-number-like aliases (digits and dashes only), in
+   `transfers/aliases.py`, so `703206283` matches `70-320-6283` (the three Barkly redraws are now
+   tagged to Barkly Street); (2) new `transfers/loan_movements.py`: a credit worded `LOAN PROCEEDS
+   FROM A/C` / `REDRAW PROCEEDS FROM A/C` is a `Transfer` (FR-9f), and a debit worded `… to <name> HL`
+   is a `Transfer` (FR-9i); instalments, repayments and interest are deliberately not matched. They
+   have no counterpart row (loan statements aren't imported), so they are typed from the text alone
+   with no TransferGroup, which is safe because `/summary` and the Portfolio queries exclude by `type`.
+   The upload endpoint applies it to new rows; `reclassify_loan_movements(session)` applies it to
+   stored rows. **Applied to the real `finance.db`** (backup: `db-backups/finance-2026-10-18-pre-part-a.db`):
+   7 rows became `Transfer` (the $900,000 and $63,014.45 drawdowns, three Barkly redraws totalling
+   $72,587, and the two `JC to Barkly HL` paydowns of −$582,076 and −$33,900); Income fell by
+   $1,035,601.45 (3,936,395.43 → 2,900,793.98); a re-run changes 0 rows. **Not covered by pattern
+   (Part C, by hand):** `Paying inv loan` and `JC to 99K` (no `HL` in the text).
+   **`/code-review` 2026-10-18: 8 findings, 3 fixed tests-first.** (1) Number aliases now need a
+   non-digit on both sides, so a loan number can't match inside a longer reference or amount (checked
+   on the real DB: across every alias and description only the 3 intended redraws changed, none lost).
+   (2) The paydown pattern is tighter: one or two alphabetic words and an upper-case `HL`, so
+   `to J Smith hl` and `to 12345 HL` no longer match. (3) A loan movement is never left flagged
+   `is_refund`. **Checked, no change:** groupless Transfer rows are safe (every transfer-group code
+   path guards on the group being set or only acts on flagged rows); the backfill function is a
+   one-off already run, and rebuilds go through the upload path. **Left:** stale category on these
+   rows (known cosmetic backlog item), docstring order (repo convention), a refund-flag difference
+   between upload and backfill that is moot for a Transfer. **Third `/code-review` round: 9 findings, 5 fixed tests-first.** (1) The upload path kept a
+   `refund_ambiguity` flag on a loan movement while the backfill cleared it; now neither keeps it, and
+   `is_refund` is derived once (`… and tx_type != "Transfer"`). (2) Tier-2 no longer picks a
+   groupless Transfer (a loan movement) as a heuristic partner. (3) The paydown pattern now needs
+   the own-account nickname: `<two upper-case letters> to <1–2 words> HL`, so a payee like `to Mr
+   Smith HL` can't match (on the real DB it still matches exactly the 2 real paydowns). (4) Alias
+   identifiers are stripped and fully matched, so trailing whitespace can't silently disable an
+   alias. **Left:** the backfill not being called from app code (one-off, already run), digits-only
+   alias behaviour (verified on real data), the sign assumption, docstring order. Original item 3 text:
+   Build item 4b (loan seeding, dash-insensitive aliases, drawdown/redraw/paydown →
    `Transfer`, property sale/purchase tags, and the per-transaction tag script for the one-offs in
    FR-9j/FR-9k). Then re-check Income and Expense totals against the figures in item 4b.
 Also pending, smaller: the CC export has a 7,000-row cap that may cut off the oldest history;

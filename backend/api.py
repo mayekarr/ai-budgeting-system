@@ -22,6 +22,7 @@ from categorisation.taxonomy import is_valid_category
 from ingestion.account_resolution import resolve_account
 from ingestion.nab_format import NabFormatError, parse_nab_format_with_report
 from transfers.detection import find_suggested_transfer_match, link_transfer_pair, process_transfer_detection
+from transfers.loan_movements import is_loan_movement
 from transfers.refunds import detect_refund
 
 from .database import SessionLocal, bulk_save_transactions, create_tables, engine  # noqa: F401  (engine kept for test monkeypatching)
@@ -290,12 +291,23 @@ async def upload_transactions(
             tx_type = "Income"
             cat_needs_review = False
 
+        if is_loan_movement(row.raw_description, row.amount):
+            # A drawdown/redraw or lump-sum loan paydown moves the user's own borrowed money
+            # (FR-9f/FR-9i). The loan statement isn't imported, so detection can't pair it; the
+            # text alone decides. Its category no longer matters, so a category flag is moot.
+            tx_type = "Transfer"
+            cat_needs_review = False
+
+        # A Transfer is neither a refund nor refund-ambiguous, whatever the refund rules saw.
+        is_refund = refund_decision.is_refund and tx_type != "Transfer"
+        refund_needs_review = refund_decision.needs_review and tx_type != "Transfer"
+
         # Priority when more than one signal is ambiguous at once, per the single shared table in
         # backend/needs_review_reasons.py (also consulted by transfers/detection.py's later
         # supersession decision, so the two stay provably consistent).
         needs_review_reason = highest_priority_reason(
             UNRECOGNISED_ACCOUNT if resolved.needs_review else None,
-            REFUND_AMBIGUITY if refund_decision.needs_review else None,
+            REFUND_AMBIGUITY if refund_needs_review else None,
             (cat_review_reason or LOW_CONFIDENCE_CATEGORY) if cat_needs_review else None,
         )
 
@@ -309,7 +321,7 @@ async def upload_transactions(
                 "category": category,
                 "subcategory": subcategory,
                 "type": tx_type,
-                "is_refund": refund_decision.is_refund,
+                "is_refund": is_refund,
                 "source": "bank_import",
                 "needs_review": needs_review_reason is not None,
                 "needs_review_reason": needs_review_reason,

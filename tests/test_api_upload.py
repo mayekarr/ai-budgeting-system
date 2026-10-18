@@ -405,6 +405,78 @@ def test_upload_without_seam_repeats_reports_zero_dropped(client):
     assert response.json()["seam_repeats_dropped"] == 0
 
 
+def test_upload_types_loan_drawdowns_and_paydowns_as_transfer_but_not_instalments(client):
+    csv = (
+        "Date,Amount,Account Number,Transaction Type,Transaction Details,Balance,Category,Merchant Name,Processed On\n"
+        "2025-09-08,900000.00,147912573,MISCELLANEOUS CREDIT,LOAN PROCEEDS FROM A/C 34-188-5257,950000.00,,,\n"
+        "2025-09-02,-582076.00,147912573,INTERNET TRANSFER,ONLINE N8131366871 JC to Barkly HL MAYEKAR A,50000.00,,,\n"
+        "2025-09-01,-6489.89,147912573,LOAN REPAYMENT,LOAN REPAYMENT TO A/C 703206283 MAYEKAR A,632076.00,,,\n"
+    )
+
+    response = _upload(client, csv)
+
+    assert response.status_code == 201
+    with api_module.SessionLocal() as session:
+        from backend.models import Transaction
+
+        by_desc = {t.raw_description: t for t in session.query(Transaction)}
+    drawdown = by_desc["LOAN PROCEEDS FROM A/C 34-188-5257"]
+    assert drawdown.type == "Transfer"
+    # Its category no longer matters, so no category flag is left. The only flag it can carry is
+    # the new account's own unrecognised_account (first row on an unseen account).
+    assert drawdown.needs_review_reason in (None, "unrecognised_account")
+    paydown = by_desc["ONLINE N8131366871 JC to Barkly HL MAYEKAR A"]
+    assert paydown.type == "Transfer"
+    assert paydown.needs_review is False
+    assert by_desc["LOAN REPAYMENT TO A/C 703206283 MAYEKAR A"].type == "Expense"
+    assert client.get("/summary").json()["total_income"] == 0  # the $900,000 no longer counts as income
+
+
+def test_loan_movement_is_never_left_flagged_as_a_refund(client, monkeypatch):
+    # A Transfer cannot be a refund, even if the refund rules also fired on the same credit.
+    from transfers.refunds import RefundDecision
+
+    monkeypatch.setattr(
+        api_module, "detect_refund",
+        lambda *a, **k: RefundDecision(is_refund=True, route_to_income=False, needs_review=False),
+    )
+    csv = (
+        "Date,Amount,Account Number,Transaction Type,Transaction Details,Balance,Category,Merchant Name,Processed On\n"
+        "2025-09-08,900000.00,147912573,MISCELLANEOUS CREDIT,LOAN PROCEEDS FROM A/C 34-188-5257,950000.00,,,\n"
+    )
+
+    assert _upload(client, csv).status_code == 201
+    with api_module.SessionLocal() as session:
+        from backend.models import Transaction
+
+        tx = session.query(Transaction).one()
+    assert tx.type == "Transfer"
+    assert tx.is_refund is False
+
+
+def test_loan_movement_does_not_keep_a_refund_ambiguity_flag(client, monkeypatch):
+    # The flag is moot once the row is a Transfer; the backfill clears it, so upload must too.
+    from transfers.refunds import RefundDecision
+
+    monkeypatch.setattr(
+        api_module, "detect_refund",
+        lambda *a, **k: RefundDecision(is_refund=False, route_to_income=False, needs_review=True),
+    )
+    csv = (
+        "Date,Amount,Account Number,Transaction Type,Transaction Details,Balance,Category,Merchant Name,Processed On\n"
+        "2025-09-08,50.00,147912573,MISCELLANEOUS CREDIT,SOMETHING ELSE,50.00,,,\n"
+        "2025-09-09,900000.00,147912573,MISCELLANEOUS CREDIT,LOAN PROCEEDS FROM A/C 34-188-5257,950000.00,,,\n"
+    )
+
+    assert _upload(client, csv).status_code == 201
+    with api_module.SessionLocal() as session:
+        from backend.models import Transaction
+
+        loan = session.query(Transaction).filter_by(raw_description="LOAN PROCEEDS FROM A/C 34-188-5257").one()
+    assert loan.type == "Transfer"
+    assert loan.needs_review_reason != "refund_ambiguity"
+
+
 def test_upload_skips_zero_dollar_notice_rows_and_reports_them(client):
     csv = SAMPLE_CSV + (
         "2026-08-06,0.00,Card ending 2957,MISCELLANEOUS CREDIT,"
