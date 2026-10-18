@@ -1,7 +1,7 @@
 # Next Steps
 
 Status: Active
-Last updated: 2026-10-11
+Last updated: 2026-10-18
 Companion to: `docs/product-requirements.md` (Draft v9) — read that first for full requirements
 detail; this doc is a resumable to-do list, not a requirements source of truth.
 
@@ -35,9 +35,44 @@ index. Performance items P1–P5 come from a measured review on 2026-09-25 (Roha
 feeling slow) — kept in their recommended relative order, interleaved with the journey work by when
 each one actually matters.
 
-**Next session — start here (agreed 2026-10-11).** Three jobs, in this order, all tests-first
-under the `tdd-workflow` skill; the evidence and decisions behind them are inside item 4b below
-and in `docs/product-requirements.md` FR-9f to FR-9k.
+**Next session — start here (updated 2026-10-18, end of session).** Jobs 1 and 2 below are done and
+job 3 (item 4b) is half done. State at hand-off: 347 tests passing; `main` pushed at `35cc640`;
+the real `finance.db` has the fixed CC data (6,567 rows, balances match the bank's statements) and
+the 7 loan drawdown/paydown rows typed `Transfer`. Backups are in the gitignored `db-backups/`
+(`finance-2026-10-18-pre-cc-rebuild.db`, `finance-2026-10-18-pre-part-a.db`). Do these, in order,
+tests-first under the `tdd-workflow` skill:
+1. **Item 4b Part B — seed the old loans.** Add the 6 unseeded loan references from the table in
+   item 4b (Rohan's answers 2026-10-03 map each to an asset) as `Loan` accounts with their numbers
+   as aliases, plus two new assets, **Mt Alexander Rd (Essendon)** and **Hillside Crescent
+   (Blackburn)**, via `config/assets.local.json` + `python -m scripts.seed_assets`; `reattribute_assets`
+   then re-tags the old instalments/interest. Data only, no new code. The Portfolio page should
+   then show 5 assets.
+2. **Item 4b Part C — the one-off tags, from a gitignored local JSON** (decided 2026-10-18).
+   First add the new subcategories to `categorisation/taxonomy.py` (`Property Sale Proceeds`,
+   `Property Purchase` under Expense, `Investment Sale Proceeds`; the correction endpoint validates
+   against it). Then a script that applies each correction keyed on exact date + amount +
+   description, idempotent (a re-run changes 0 rows) so it survives a `finance.db` rebuild. The list
+   is FR-9j and FR-9k in `docs/product-requirements.md` (India sale credits, Hillside sale, Barkly
+   and Jericho Ct purchases, MLC share sale, `Paying inv loan` and `JC to 99K` as `Transfer`,
+   trauma payouts, super contributions, `for MLC` top-up, Waverley BMW pair). Confirm each row
+   against the DB before applying.
+3. **Item 4b Part D — verify:** Income and Expense totals (Income was $2,900,793.98 after Part A),
+   Portfolio shows 5 assets, re-running the seed and the tag script changes 0 rows. Then
+   `/code-review` and commit.
+**Smaller open items from this session:** (a) the 14 zero-dollar notice rows already in JC/RC/AC
+(skipped on future imports only; delete them? Rohan's call). (b) The CC-only replace script exists
+only in the session scratchpad; its procedure is written up in job 2 below, so commit it under
+`scripts/` if it will be reused. (c) CC history Oct 2019 → 2020-02-17 is a backlog item (bank PDFs
+in `transaction-files/CC Statements/`, now gitignored; needs a PDF parser). (d) Overview showing
+property sale proceeds separately, and the MAC/MACACC/NBA parsers (item 5) are still open. (e) 
+Still no Anthropic API key (about 1,200 `llm_unavailable` review rows).
+**Working notes:** `.claude/settings.local.json` is untracked and intentionally left out of commits.
+In this environment a Python heredoc turns `\n` escapes inside test files into real newlines; write
+test files with the Write/Edit tools instead.
+
+*History of the 2026-10-11 plan (the three jobs and their evidence):* agreed 2026-10-11; the evidence
+and decisions behind them are inside item 4b below and in `docs/product-requirements.md` FR-9f to
+FR-9k.
 1. ~~**Fix the CC export repeats in the importer.**~~ — **Done** 2026-10-18 (code-review not yet
    run; the `finance.db` rows are not yet removed, that is job 2's rebuild). New
    `ingestion/seam_repeats.py`, called from `parse_nab_format`, so it applies to every NAB-style
