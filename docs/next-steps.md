@@ -90,11 +90,12 @@ and in `docs/product-requirements.md` FR-9f to FR-9k.
    compare): all three are clean. Balance chains have 0 breaks, dates are strictly in order, no
    identical rows, no blanks, nothing future-dated. The only oddity is **14 zero-dollar bank
    notices** stored as `MISCELLANEOUS CREDIT` (JC 1, RC 5, AC 8: debit-rate and offset-arrangement
-   changes), which sat in Needs Review as `Expense`/`Miscellaneous`. **Decided and done
+   changes), which sat in Needs Review as `Expense`/`Miscellaneous` (still there until deleted; the
+   CC-only rebuild didn't touch JC/RC/AC). **Decided and done
    2026-10-18 (Rohan's call): $0 rows are skipped at import**, in the parser, and counted in the
    upload response (`zero_amount_skipped`, plus a sentence in `message`). Skipping them doesn't
    break the balance chain, since their amount is 0. Tests-first, 310 passing. The 14 rows already
-   in `finance.db` go at the rebuild.
+   in `finance.db` stay until deleted or until JC/RC/AC are rebuilt.
    *Original brief:* Every CC export from the bank repeats a 90-row
    block at each 1,000-row page seam (dates jump backward at rows 2000/3000/4000/5000/6000).
    Confirmed fake against the bank's own statement. Drop a row that exactly matches another about
@@ -104,7 +105,29 @@ and in `docs/product-requirements.md` FR-9f to FR-9k.
    jumps; a DB scan of RC/AC/JC found no identical same-day rows. But AC (987 rows) and RC (923)
    are close to the limit, so their next export will likely repeat blocks too. Add a test with an
    AC- or RC-shaped file that crosses 1,000 rows.
-2. **Rebuild the CC data from `transaction-files/BankTransactions - long - CC - 1.xlsx`** (the
+2. ~~**Rebuild the CC data**~~ — **Done** 2026-10-18 (Rohan chose "rebuild only the CC rows").
+   Source is now `transaction-files/BankTransactions - long - CC.xlsx` (renamed from `... - CC - 1.xlsx`
+   at Rohan's request; the old `long - CC.xlsx`, which still had seam repeats, was moved to
+   `transaction-files/archive/` and is superseded, as are all the old short files). Backup first:
+   `db-backups/finance-2026-10-18-pre-cc-rebuild.db` (10,795 rows, gitignored). **What it did:**
+   (1) reset the 221 JC/RC/AC rows that shared a transfer group with a CC row (unlinked, type by
+   sign); (2) deleted the CC rows and their 187 groups; (3) merged the four CC identifiers into
+   one `CC` account (id 4, four aliases; accounts 5–7 removed); (4) uploaded the file through the
+   normal `/transactions/upload` pipeline (6,540 rows, 460 seam repeats dropped); (5) re-ran
+   transfer detection on the reset rows: **all 221 re-linked**. **Kept 27 older rows instead of
+   deleting them:** the fresh export stops mid-day on 2020-02-17 (7,000-row cap), but the old DB
+   had real CC rows back to 2020-02-05 (amounts confirmed on the Feb 2020 statement), including
+   the $7,201.28 payment that clears the January statement and pairs with a JC autopay. Their
+   balances were re-chained from the fresh file. **Result:** CC has 6,567 rows, top balance
+   −$6,010.91, stored balance chain 0 breaks, and **80 of 80 statement closing balances match**
+   (both from amounts and from the stored balance column). JC/RC/AC rows are byte-identical in
+   every field except transfer links; the two manual Ramesh credits (RC ids 10794/10795) were
+   untouched, so no re-adding was needed. Net Transfer total fell from +$13,528.80 to +$531.86
+   (transfers should net near zero), Expense from −$3,773,290 to −$3,724,879. Review queue:
+   `unrecognised_account` 7 → 3 (the remaining 3 are RC/AC/JC). **Left alone on purpose:** the 14
+   zero-dollar notice rows already in JC/RC/AC (skipped only on future imports; say if you want them
+   deleted). The replace script lives only in the session scratchpad; the procedure above is the
+   record. *Original brief:* Rebuild the CC data from `transaction-files/BankTransactions - long - CC - 1.xlsx` (the
    fresh export to 2026-10-11) and drop the old `CC.xlsx`, which has changed since it was
    analysed. Then **re-add the two manual Ramesh credits** (RC `Income`/`Other`, +$1,000 each on
    2020-04-01 and 2020-04-15), which a rebuild erases. Ask Rohan first whether to rebuild the whole
