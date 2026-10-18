@@ -543,6 +543,26 @@ are treated. Everything below applies to refunds generally, tax refunds excepted
   own statement. The fix belongs in ingestion, not a one-off DB edit, because J8 and
   every future upload will hit it: drop a row that exactly matches another 90 rows earlier/later
   *and* sits at a chunk seam. Existing rows in `finance.db` need removing or marking superseded.
+  **Done 2026-10-18 (importer only):** `ingestion/seam_repeats.py` drops a block of `k >= 10` rows
+  that exactly repeats the `k` rows before it at a date-order break (balance ignored). Inspecting
+  the real file showed the copy sits *immediately after* the seam and is 92 rows, 460 in total
+  across the five seams. Verified 0 false drops on AC, JC, RC. The existing `finance.db` rows go
+  at the CC rebuild (next-steps job 2).
+  **Decisively confirmed 2026-10-18 against the bank's own PDF statements** (84 monthly CC
+  statements, 2019-10 → 2026-09, in `transaction-files/CC Statements/`). Method: for each statement
+  closing date D, balance implied by the file = top balance (−$6,010.91) minus the sum of every
+  amount dated after D, compared with the statement's "Closing balance". **With the repeats
+  dropped, 80 of 84 match to the cent. With them kept, only 21 match** (every statement after the
+  last seam; before it the gap equals the running total of the repeated blocks, up to $11,596.79).
+  The 4 misses are the statements from Oct 2019 to Jan 2020, which pre-date the export's first
+  row (2020-02-17), so the 7,000-row cap did cut off history. Conclusion: the repeats are fake and
+  the file's own `Balance` column is **not** the bank's ledger (it was computed over the stitched
+  rows), so it is wrong on every kept row older than the first seam. The sum of the dropped
+  blocks is $11,596.79.
+  **Decided 2026-10-18 (Rohan):** the importer recomputes the surviving balances backward from the
+  newest row (only after a drop), instead of nulling them or trusting the file. Verified against
+  the statements. The lost Oct 2019 → Feb 2020 history is a backlog item (next-steps, lower
+  priority).
   Consequence: the 2024-01-10 −$6,412.96 premium is paid once, matching the user's account.
   **Manual entry, 2026-10-11:** the two Ramesh repayments missing from the RC export were added
   to `finance.db` by hand as `source='manual'` rows (id 10794: 2020-04-01, id 10795: 2020-04-15;

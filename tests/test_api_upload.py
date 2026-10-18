@@ -373,3 +373,49 @@ def test_persistence_failure_returns_controlled_500_not_unhandled_exception(clie
     response = _upload(client)
 
     assert response.status_code == 500
+
+
+def _seam_repeat_csv(unique_rows: int, seam: int, block: int) -> str:
+    """Newest-first export where the `block` rows before `seam` are re-listed right after it."""
+    from datetime import date, timedelta
+
+    def line(i: int) -> str:
+        d = date(2026, 8, 20) - timedelta(days=i // 2)
+        return f"{d.isoformat()},-{10 + i}.00,Card ending 2957,PURCHASE,SHOP {i} MELBOURNE,-100.00,,,"
+
+    idx = list(range(unique_rows))
+    idx = idx[:seam] + idx[seam - block : seam] + idx[seam:]
+    header = "Date,Amount,Account Number,Transaction Type,Transaction Details,Balance,Category,Merchant Name,Processed On"
+    return header + "\n" + "\n".join(line(i) for i in idx) + "\n"
+
+
+def test_upload_reports_dropped_seam_repeats(client):
+    response = _upload(client, _seam_repeat_csv(unique_rows=60, seam=30, block=15))
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["count"] == 60
+    assert body["seam_repeats_dropped"] == 15
+    assert "15" in body["message"]
+
+
+def test_upload_without_seam_repeats_reports_zero_dropped(client):
+    response = _upload(client)
+
+    assert response.json()["seam_repeats_dropped"] == 0
+
+
+def test_upload_skips_zero_dollar_notice_rows_and_reports_them(client):
+    csv = SAMPLE_CSV + (
+        "2026-08-06,0.00,Card ending 2957,MISCELLANEOUS CREDIT,"
+        "PLEASE NOTE FROM 05 AUG 2026 YOUR DEBIT INT RATE IS 15.41%,-3781.44,,,\n"
+    )
+
+    response = _upload(client, csv)
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["count"] == 2
+    assert body["zero_amount_skipped"] == 1
+    assert "1" in body["message"]
+    assert all(t["amount"] != 0 for t in client.get("/transactions").json())

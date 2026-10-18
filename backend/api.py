@@ -20,7 +20,7 @@ from categorisation.rules import match_rule
 from categorisation.seed_rules import seed_rules_if_empty
 from categorisation.taxonomy import is_valid_category
 from ingestion.account_resolution import resolve_account
-from ingestion.nab_format import NabFormatError, parse_nab_format
+from ingestion.nab_format import NabFormatError, parse_nab_format_with_report
 from transfers.detection import find_suggested_transfer_match, link_transfer_pair, process_transfer_detection
 from transfers.refunds import detect_refund
 
@@ -111,6 +111,10 @@ class UploadResult(BaseModel):
     message: str
     count: int
     needs_review_count: int
+    # Rows removed from the file as export-seam repeats (FR-9k); 0 for a normal upload.
+    seam_repeats_dropped: int = 0
+    # $0 bank notices (rate/offset-arrangement changes) left out of the import.
+    zero_amount_skipped: int = 0
 
 
 class CategorySummary(BaseModel):
@@ -233,10 +237,14 @@ async def upload_transactions(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unable to read uploaded file: {exc}") from exc
 
     try:
-        parsed_rows = parse_nab_format(contents, filename=file.filename)
+        parse_result = parse_nab_format_with_report(contents, filename=file.filename)
     except NabFormatError as exc:
         logger.warning("NAB format parse error: %s", exc)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    parsed_rows = parse_result.rows
+    seam_repeats_dropped = parse_result.seam_repeats_dropped
+    zero_amount_skipped = parse_result.zero_amount_skipped
 
     # Loaded once for the whole upload, not per row (the per-row reload pattern is P4's problem).
     asset_lookups = load_asset_lookups(db)
@@ -339,10 +347,17 @@ async def upload_transactions(
     needs_review_count = sum(1 for tx in saved_rows if tx.needs_review)
 
     logger.info("Upload complete: %d saved, %d flagged for review.", len(saved_rows), needs_review_count)
+    message = "Transactions imported successfully."
+    if seam_repeats_dropped:
+        message += f" Ignored {seam_repeats_dropped} repeated row(s) the bank's export duplicated at its page seams."
+    if zero_amount_skipped:
+        message += f" Skipped {zero_amount_skipped} zero-dollar bank notice row(s)."
     return UploadResult(
-        message="Transactions imported successfully.",
+        message=message,
         count=len(saved_rows),
         needs_review_count=needs_review_count,
+        seam_repeats_dropped=seam_repeats_dropped,
+        zero_amount_skipped=zero_amount_skipped,
     )
 
 

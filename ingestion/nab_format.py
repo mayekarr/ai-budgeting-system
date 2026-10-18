@@ -23,6 +23,8 @@ from typing import Optional
 
 import pandas as pd
 
+from ingestion.seam_repeats import drop_seam_repeats
+
 REQUIRED_COLUMNS = {"date", "amount", "account number", "transaction type", "transaction details", "balance"}
 
 
@@ -78,8 +80,23 @@ def _require_text(raw, lower_cols: dict, column: str, row_num: int) -> str:
     return str(val).strip()
 
 
+@dataclass
+class ParseResult:
+    rows: list[ParsedRow]
+    # Rows removed as export-seam repeats (ingestion/seam_repeats.py), so callers can surface it.
+    seam_repeats_dropped: int = 0
+    # $0 rows skipped: bank notices stored as transactions (rate changes, offset-arrangement
+    # changes). They move no money and would only add noise to Needs Review.
+    zero_amount_skipped: int = 0
+
+
 def parse_nab_format(raw_bytes: bytes, *, filename: str) -> list[ParsedRow]:
     """Parse a NAB-style statement export into a list of normalized rows."""
+    return parse_nab_format_with_report(raw_bytes, filename=filename).rows
+
+
+def parse_nab_format_with_report(raw_bytes: bytes, *, filename: str) -> ParseResult:
+    """Like `parse_nab_format`, but also reports how many seam-repeat and $0 rows were left out."""
     df = _read_dataframe(raw_bytes, filename)
     df.columns = [str(c).strip() for c in df.columns]
     lower_cols = {c.lower(): c for c in df.columns}
@@ -131,4 +148,11 @@ def parse_nab_format(raw_bytes: bytes, *, filename: str) -> list[ParsedRow]:
             )
         )
 
-    return rows
+    # The bank's export tool repeats a block at each 1,000-row page seam (FR-9k); drop those copies.
+    kept, dropped = drop_seam_repeats(rows)
+    non_zero = [r for r in kept if r.amount != 0]
+    return ParseResult(
+        rows=non_zero,
+        seam_repeats_dropped=len(dropped),
+        zero_amount_skipped=len(kept) - len(non_zero),
+    )

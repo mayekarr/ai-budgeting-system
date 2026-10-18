@@ -38,7 +38,64 @@ each one actually matters.
 **Next session — start here (agreed 2026-10-11).** Three jobs, in this order, all tests-first
 under the `tdd-workflow` skill; the evidence and decisions behind them are inside item 4b below
 and in `docs/product-requirements.md` FR-9f to FR-9k.
-1. **Fix the CC export repeats in the importer.** Every CC export from the bank repeats a 90-row
+1. ~~**Fix the CC export repeats in the importer.**~~ — **Done** 2026-10-18 (code-review not yet
+   run; the `finance.db` rows are not yet removed, that is job 2's rebuild). New
+   `ingestion/seam_repeats.py`, called from `parse_nab_format`, so it applies to every NAB-style
+   account. **Real layout, found by inspecting the file:** the block right *after* each seam is a
+   verbatim copy of the block right *before* it (92 rows, not 90; the block length equals the
+   offset at all five seams), so the rule is "at a date-order break, the `k` rows before match the
+   `k` rows after exactly, `k >= 10`". A single matching row never qualifies, so genuine same-day
+   repeats (1–8 rows apart, no order break) are safe. Ambiguous cases (near-miss block, no order
+   break) are kept. Balance is ignored in the match (the export recomputes it). Works for
+   newest-first and oldest-first files. Dropped rows are logged (warning), not stored.
+   **Verified on the real files:** fresh CC export 7,000 → 6,540 (**460** dropped = 5 × 92); AC,
+   JC, RC and the old `CC.xlsx` drop **0**. The 460 is higher than the 442/452 "twins" counted
+   earlier, because those counts were a looser same-key tally; the block match is exact.
+   Tests-first: `tests/test_ingestion_seam_repeats.py` (10 tests, incl. a 1,100-row AC-shaped file
+   crossing the limit); 294 passing. **Known limit:** a repeat whose rows all share one date has
+   no order break, so it is kept (fails toward keeping).
+   **Revalidated 2026-10-18 against 84 bank PDF statements** (`transaction-files/CC Statements/`):
+   80 of 84 closing balances match the fixed file to the cent (21 with the repeats kept). The 4
+   misses are Oct 2019 → Jan 2020, before the export's first row, so the 7,000-row cap did lose
+   history. Details in FR-9k. The file's `Balance` column is wrong on rows older than the first
+   seam. **Decided and done 2026-10-18 (Rohan's call):** after a drop, the surviving balances are
+   recomputed backward from the newest row's balance (`_recompute_balances` in
+   `ingestion/seam_repeats.py`; only when something was dropped, and only if the newest row has a
+   balance). Tests-first, 298 passing. On the real CC file the balance chain now has 0 breaks and
+   the rows at 2024-12-23 and 2022-06-22 read −$7,183.25 and −$10,376.83, exactly the statements'
+   closing balances. Opening balance on 2020-02-17 works out to −$4,699.56.
+   **`/code-review` 2026-10-18: 8 findings, 4 fixed tests-first (304 passing).** (1) The block
+   matcher sliced for every block length at every order break, so a file with no date order could
+   hang an upload: it now rejects on the first row before slicing (a 3,000-row alternating-date
+   file scans in under a second). (2) The drop was invisible: `parse_nab_format_with_report`
+   returns the count, and `POST /transactions/upload` now returns `seam_repeats_dropped` and
+   mentions it in `message` (`parse_nab_format` is unchanged for other callers). (3) The balance
+   recompute now checks that the newest end of the file (rows before the first drop) chains
+   before overwriting anything, and skips otherwise. (4) A row the bank gave no balance for stays
+   `None`. **Deliberately not changed:** per-account balance chains (CC's cards 7128/2957/3839
+   share one account and the combined chain matches the statements, so per-card would break it;
+   the importer assumes one account per file), repeats with no date break (kept, as designed),
+   direction inference from first/last row, and `from __future__` before the docstring (matches
+   `nab_format.py`).
+   **Second `/code-review` pass, same day: 9 findings, 2 fixed tests-first (306 passing).** (1) A
+   real bug: in an oldest-first file that ends with a repeated block, the balance anchor was a
+   *dropped* row, so correct balances would have been overwritten from a wrong value; the anchor
+   is now the newest row that survives (doesn't affect the real CC file, which is newest-first).
+   (2) The log merged adjacent dropped blocks into one count; blocks are now counted as found.
+   Checked, no change: nothing else matches the upload `message` text, and the only production
+   caller of the parser is the upload endpoint, which uses the report variant. The rest repeat
+   round-1 findings that were deliberately left. **Optional, not done:** cap the block size at the
+   page size (~1,000) to bound the worst case on pathological files.
+   **JC/RC/AC anomaly check, 2026-10-18** (internal consistency only, no bank statements to
+   compare): all three are clean. Balance chains have 0 breaks, dates are strictly in order, no
+   identical rows, no blanks, nothing future-dated. The only oddity is **14 zero-dollar bank
+   notices** stored as `MISCELLANEOUS CREDIT` (JC 1, RC 5, AC 8: debit-rate and offset-arrangement
+   changes), which sat in Needs Review as `Expense`/`Miscellaneous`. **Decided and done
+   2026-10-18 (Rohan's call): $0 rows are skipped at import**, in the parser, and counted in the
+   upload response (`zero_amount_skipped`, plus a sentence in `message`). Skipping them doesn't
+   break the balance chain, since their amount is 0. Tests-first, 310 passing. The 14 rows already
+   in `finance.db` go at the rebuild.
+   *Original brief:* Every CC export from the bank repeats a 90-row
    block at each 1,000-row page seam (dates jump backward at rows 2000/3000/4000/5000/6000).
    Confirmed fake against the bank's own statement. Drop a row that exactly matches another about
    90 rows away across a seam; keep genuine same-day repeat purchases (1–8 rows apart).
@@ -375,6 +432,16 @@ review rows).
     would need their own backup).
 
 **Lower priority / no deadline:**
+- **Backfill the lost CC history, Oct 2019 → 2020-02-17** (backlog, Rohan's call 2026-10-18). The
+  CC export's 7,000-row cap starts at 2020-02-17, so the first ~4 months are missing. The four
+  bank PDF statements `7128-20191022`, `20191122`, `20191223`, `20200122` (and part of
+  `20200221`) in `transaction-files/CC Statements/` hold them. Needs a PDF statement parser
+  (`pdftotext -layout` works, but the layout is messy: date processed, date of transaction, card
+  number, details, amount, with DR/CR on the balances) and a way to merge with the export without
+  re-adding rows after 2020-02-17. Check afterwards: the closing balances for those four
+  statements (−$1,659.07, −$2,075.31, −$4,935.36, −$7,201.28) should reconcile with the
+  imported rows, and the opening balance on 2020-02-17 should be −$4,699.56. Also useful later as
+  a generic "statement PDF" importer for other accounts.
 - **"Net tax position" per year** (J7 follow-up, not decided). Refunds minus "Tax paid to ATO"
   payments. Source 2 has payment years (e.g. 2014, 2017, 2018) that the refunds-only view doesn't
   show. Also: real bank descriptions for ATO refunds haven't been seen yet (none in current

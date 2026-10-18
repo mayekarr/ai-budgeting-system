@@ -85,3 +85,33 @@ def test_blank_transaction_type_raises_instead_of_becoming_the_literal_string_na
     )
     with pytest.raises(NabFormatError):
         parse_nab_format(bad_csv.encode(), filename="statement.csv")
+
+
+ZERO_ROW_CSV = (
+    "Date,Amount,Account Number,Transaction Type,Transaction Details,Balance,Category,Merchant Name,Processed On\n"
+    "2026-08-08,-38.66,Card ending 2957,PURCHASE AUTHORISATION,HILLS MEATS,-100.00,,,\n"
+    "2026-08-07,0.00,147912186,MISCELLANEOUS CREDIT,PLEASE NOTE FROM 06 AUG 2026 YOUR DEBIT INT RATE IS 15.41%,5.00,,,\n"
+    "2026-08-06,-10.00,Card ending 2957,PURCHASE AUTHORISATION,CAFE,-61.34,,,\n"
+)
+
+
+def test_zero_dollar_rows_are_skipped_and_counted():
+    from ingestion.nab_format import parse_nab_format_with_report
+
+    result = parse_nab_format_with_report(ZERO_ROW_CSV.encode(), filename="statement.csv")
+
+    assert [r.raw_description for r in result.rows] == ["HILLS MEATS", "CAFE"]
+    assert result.zero_amount_skipped == 1
+
+
+def test_parse_nab_format_also_omits_zero_dollar_rows():
+    rows = parse_nab_format(ZERO_ROW_CSV.encode(), filename="statement.csv")
+
+    assert all(r.amount != 0 for r in rows)
+    assert len(rows) == 2
+
+
+def test_file_without_zero_dollar_rows_reports_zero_skipped():
+    from ingestion.nab_format import parse_nab_format_with_report
+
+    assert parse_nab_format_with_report(SAMPLE_CSV.encode(), filename="s.csv").zero_amount_skipped == 0
