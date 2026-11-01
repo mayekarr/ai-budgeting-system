@@ -523,6 +523,7 @@ are treated. Everything below applies to refunds generally, tax refunds excepted
     **NBA (CBA) account**, so it is a `Transfer` that stays unpaired until the NBA parser exists
     (item 5), not `Income`.
     **Update 2026-11-01 (Rohan):** the 'transfer sydney expe / Sydney travel expenses' credits on RC (8 rows, including the 2026-09-30 $3,000) are the **employer reimbursing travel expenses already paid**. They net against Travel & Holidays (a seeded rule), not `Income`; once NBA is parsed, the NBA to RC movement pairs as a `Transfer` and the employer credit on NBA is the real reimbursement. Valsala Mathew and Ramesh Kambala credits are family-loan repayments (`Income` / `Other`).
+    **Update 2026-11-01 (Rohan):** the 66 periodic $750 `MLC MKIS` debits (2019-10 to 2022-04) are transfers into the share portfolio (`Transfer`, like the super contributions above), and the $284,903.24 `MLC MKIS CREDITS` on 2022-04-19 is the sale payout (`Income` / `Investment Sale Proceeds`). The monthly $1,000 `ex loanrepay` debits (2021-06 to 2022-05) are extra repayments on the Hillside mortgage: `Expense` / Loan Repayment, tagged to that asset.
   **Found 2026-10-11 — the CC long export repeats five 90-row blocks (an export-stitching
   artifact).** At every 1,000-row boundary (file rows 2000, 3000, 4000, 5000, 6000) the file jumps
   back and re-lists the 90 rows that ended the previous chunk (e.g. row 1999 is 2024-12-20 and row

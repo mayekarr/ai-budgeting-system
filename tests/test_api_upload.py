@@ -515,3 +515,15 @@ def test_upload_still_pairs_a_card_payment_with_its_counterpart_when_both_are_pr
     rows = client.get("/transactions").json()
     assert {r["type"] for r in rows} == {"Transfer"}
     assert len({r["transfer_group_id"] for r in rows}) == 1 and rows[0]["transfer_group_id"] is not None
+
+
+def test_upload_types_an_mlc_mkis_contribution_as_transfer_but_not_the_sale_payout(client):
+    csv = (
+        _UPLOAD_HEADER
+        + "2022-04-06,-750.00,147912573,DEBIT,30774608 0003 MLC MKIS Rohan & Anila Ma,1000.00,,,\n"
+        + "2022-04-19,284903.24,147912573,CREDIT,30774608 0097 MLC MKIS CREDITS Rohan & Anila Ma,300000.00,,,\n"
+    )
+    assert _upload(client, csv).status_code == 201
+    rows = {r["amount"]: r for r in client.get("/transactions").json()}
+    assert rows[-750.0]["type"] == "Transfer" and rows[-750.0]["category"] is None
+    assert rows[284903.24]["type"] == "Income"

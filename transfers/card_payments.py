@@ -33,8 +33,8 @@ def is_card_payment(raw_description: str, amount: float) -> bool:
     return False
 
 
-def mark_as_card_payment(tx: Transaction) -> None:
-    """Type one row as a lone Transfer; its category no longer means anything."""
+def mark_as_lone_transfer(tx: Transaction) -> None:
+    """Type one row as a Transfer with no counterpart row; its category no longer means anything."""
     tx.type = "Transfer"
     tx.category = None
     tx.subcategory = None
@@ -54,7 +54,7 @@ def reclassify_card_payments(session: Session) -> int:
     changed = 0
     for tx in rows:
         if is_card_payment(tx.raw_description, tx.amount):
-            mark_as_card_payment(tx)
+            mark_as_lone_transfer(tx)
             changed += 1
     session.flush()
     return changed

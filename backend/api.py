@@ -27,7 +27,8 @@ from transfers.detection import (
     link_transfer_pair,
     process_transfer_detection,
 )
-from transfers.card_payments import is_card_payment, mark_as_card_payment
+from transfers.card_payments import is_card_payment, mark_as_lone_transfer
+from transfers.investment_contributions import is_investment_contribution
 from transfers.loan_movements import is_loan_movement
 from transfers.refunds import detect_refund
 
@@ -297,11 +298,14 @@ async def upload_transactions(
             tx_type = "Income"
             cat_needs_review = False
 
-        if is_loan_movement(row.raw_description, row.amount):
+        if is_loan_movement(row.raw_description, row.amount) or is_investment_contribution(
+                row.raw_description, row.amount):
             # A drawdown/redraw or lump-sum loan paydown moves the user's own borrowed money
             # (FR-9f/FR-9i). The loan statement isn't imported, so detection can't pair it; the
             # text alone decides. Its category no longer matters, so a category flag is moot.
+            # (A share-portfolio contribution, MLC MKIS, is typed the same way.)
             tx_type = "Transfer"
+            category, subcategory = None, None
             cat_needs_review = False
 
         # A Transfer is neither a refund nor refund-ambiguous, whatever the refund rules saw.
@@ -362,7 +366,7 @@ async def upload_transactions(
         # A card payment detection could not pair (its counterpart isn't imported yet) is still a
         # Transfer by its text alone; a later-arriving counterpart pairs with it via Tier 1.
         if tx.type != "Transfer" and is_card_payment(tx.raw_description, tx.amount):
-            mark_as_card_payment(tx)
+            mark_as_lone_transfer(tx)
             card_payments_marked = True
     if card_payments_marked:
         db.commit()

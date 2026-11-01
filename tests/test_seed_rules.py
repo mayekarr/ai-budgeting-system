@@ -339,3 +339,19 @@ def test_add_missing_seed_rules_leaves_the_commit_to_the_caller(session):
     assert add_missing_seed_rules(session) > 0
     session.rollback()
     assert session.query(CategorisationRule).count() == 0
+
+
+@pytest.mark.parametrize("description, subcategory", [
+    ("LOAN INSTALMENT TO A/C 399934242 MAYEKAR", "Loan Repayment"),
+    ("ONLINE G5538115221 Month ex loanrepay MAYEKAR A", "Loan Repayment"),
+])
+def test_loan_instalments_and_extra_repayments_are_loan_repayments(session, description, subcategory):
+    seed_rules_if_empty(session)
+    match = match_rule(session, description)
+    assert (match.category, match.subcategory) == ("Loans & Finance", subcategory)
+
+
+def test_airline_rule_files_air_lanka_under_flights(session):
+    seed_rules_if_empty(session)
+    match = match_rule(session, "AIR LANKA IRLINES LIMITKATUNAYAKE")
+    assert (match.category, match.subcategory) == ("Travel & Holidays", "Flights")

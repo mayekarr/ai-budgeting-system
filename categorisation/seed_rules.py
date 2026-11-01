@@ -199,6 +199,13 @@ SEED_RULES: list[dict] = [
     # the spend it repays so GET /summary nets it against that spend instead of counting it as income.
     # The MAYEKAR prefix keeps ordinary Sydney merchants (IINET LTD N SYDNEY) out.
     dict(pattern=r'MAYEKAR\s*(TRANSFER\s*)?SYDNEY', match_type="regex", category='Travel & Holidays', subcategory='Other', priority=130),
+    # The bank words mortgage instalments "LOAN INSTALMENT TO A/C <loan number>"; only the older
+    # "LOAN REPAYMENT" wording had a rule, leaving 241 instalments ($270k) in Miscellaneous. They
+    # stay Expense (J6's cash-flow view). "ex loanrepay" (no space) is Rohan's monthly extra
+    # repayment on the Hillside mortgage (2026-11-01).
+    dict(pattern='LOAN INSTALMENT TO A/C', match_type="substring", category='Loans & Finance', subcategory='Loan Repayment', priority=127),
+    dict(pattern='EX LOANREPAY', match_type="substring", category='Loans & Finance', subcategory='Loan Repayment', priority=127),
+    dict(pattern='AIR LANKA', match_type="substring", category='Travel & Holidays', subcategory='Flights', priority=108),
     # Real, unambiguous merchants reported live by Rohan, each independently confirmed against the
     # real xlsx's own bank Category/Merchant Name columns (Donations/Oxfam Australia; Insurance/
     # Allianz Insurance) -- see the "using bank Category/Merchant Name" note in docs/next-steps.md.
