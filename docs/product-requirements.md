@@ -440,7 +440,7 @@ are treated. Everything below applies to refunds generally, tax refunds excepted
      lower-confidence matches are flagged for user review (same pattern as FR-10).
 - Exact matching tolerance (date window, amount tolerance for fees/rounding) is a design-phase
   concern, not fixed here.
-- FR-9f (**Decided** 2026-10-03, Rohan's call; **built 2026-10-18**, `transfers/loan_movements.py`): a loan **drawdown or redraw** —
+- FR-9f (**Decided** 2026-10-03, Rohan's call; **built 2026-10-18**, `transfers/loan_movements.py`; **superseded 2026-11-01 by FR-9l**: a drawdown is now `Income / Loan Drawdown`, not a Transfer): a loan **drawdown or redraw** —
   a credit from a loan account (`LOAN PROCEEDS FROM A/C …`, `REDRAW PROCEEDS FROM A/C …`) — is a
   `Transfer`, not `Income`. Why: it's the user's own borrowed money moving between their own
   accounts, not earnings. Found when the 2026-10-03 backfill typed a single $900,000 Jericho Ct
@@ -463,7 +463,7 @@ are treated. Everything below applies to refunds generally, tax refunds excepted
 - FR-9h (**Decided** 2026-10-03, not yet built): a **property purchase or settlement** (e.g. the
   2022 `DEFT` payment and `SETTLEMENT SHORTFALL`) is an `Expense` with subcategory `Property
   Purchase` — the mirror of FR-9g, so income shows the sale and expenses show the purchase.
-- FR-9i (**Decided** 2026-10-03; pattern part **built 2026-10-18** for `… to <name> HL`): a **lump-sum paydown to one of the user's own loan
+- FR-9i (**Decided** 2026-10-03; pattern part **built 2026-10-18** for `… to <name> HL`; **superseded 2026-11-01 by FR-9l**: a lump-sum paydown is now `Loans & Finance / Loan Paydown`, an expense): a **lump-sum paydown to one of the user's own loan
   accounts** (e.g. −$582,076 `JC to Barkly HL`, 2025-09-02) is a `Transfer`: per FR-9d both sides
   are the user's own accounts, and it reduces debt rather than being spending. **Regular
   instalments and interest stay `Expense`** (J6's cash-flow definition, because they include
@@ -471,6 +471,7 @@ are treated. Everything below applies to refunds generally, tax refunds excepted
   a $582k expense. How to tell a lump sum from an instalment is not designed yet — description
   patterns (`JC to <loan> HL`, vs `LOAN REPAYMENT/INSTALMENT TO A/C`) look sufficient on the real
   data but need checking.
+- FR-9l (**Decided** 2026-11-01, Rohan's call; **built 2026-11-01**, `categorisation/capital_events.py`): **capital and financing events are not Transfers.** Money that leaves your spendable cash and does not come back unless an investment is sold, or that arrives as borrowing, is a real flow even though it is not day-to-day earning or spending. So: share-portfolio contributions (`MLC MKIS`) are `Investment / Share Portfolio Contribution`; extra super contributions (`BPAY MLC Super`) are `Investment / Super Contribution`; lump-sum loan paydowns are `Loans & Finance / Loan Paydown` (distinct from the regular `Loan Repayment` instalments); loan drawdowns and redraws are `Income / Loan Drawdown`. All are text-decided (the loan and MLC statements aren't imported, so no counterpart exists) and supersede FR-9f, FR-9i and the super/MLC lines of FR-9j/FR-9k. **Why not Transfer:** a Transfer is excluded from every total, which hid $1.0M of borrowing and about $830k of money put into debt reduction and investments. **The cost, and the fix:** they swamp day-to-day numbers (one $582k paydown dwarfs a month of spending), so `GET /summary` takes `scope=operating|capital|all` and Overview offers Day-to-day (default) / Capital & financing / Everything. Capital = property sale and purchase, investment sale proceeds, contributions, drawdowns and paydowns (`is_capital_event`). These rows are also never offered to heuristic transfer pairing. Known: the Portfolio page still counts a drawdown as the asset's income and a paydown as its expense.
 - FR-9j (**Decided** 2026-10-11, Rohan's call; **built 2026-11-01**, `categorisation/one_off_corrections.py` + `scripts/apply_corrections.py`; `Property Purchase` is a subcategory of the new `Investment` category, decided 2026-11-01): the remaining 2022–2025 one-offs,
   tagged individually from Rohan's explanations (a rule can't infer these from the text):
   - **India property sale** — the eight 2024-11-06 `…MAINTENANCE` credits (RC + AC, $287,224.69)

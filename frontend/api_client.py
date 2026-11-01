@@ -37,6 +37,7 @@ def get_summary(
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
     account_id: Optional[int] = None,
+    scope: str = "all",
 ) -> dict:
     params = {}
     if date_from is not None:
@@ -45,6 +46,8 @@ def get_summary(
         params["date_to"] = date_to.isoformat()
     if account_id is not None:
         params["account_id"] = account_id
+    if scope != "all":
+        params["scope"] = scope
     return _get("/summary", params)
 
 

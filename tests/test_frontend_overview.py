@@ -227,3 +227,26 @@ def test_tax_refund_view_still_works_when_the_monthly_summary_fails():
 
     assert any("summary down" in e.value for e in at.error)
     assert list(at.dataframe[0].value["Year"]) == ["2019", "2020", "2021"]
+
+
+def test_overview_defaults_to_day_to_day_and_asks_the_summary_for_that_scope():
+    with patch("frontend.api_client.get_summary", side_effect=_fake_summary) as mock_get:
+        at = _open_overview()
+        at.run()
+
+    assert not at.exception
+    assert at.radio(key="overview_scope").value == "Day-to-day"
+    assert mock_get.call_args.kwargs["scope"] == "operating"
+
+
+def test_switching_the_scope_refetches_with_the_matching_scope():
+    with patch("frontend.api_client.get_summary", side_effect=_fake_summary) as mock_get:
+        at = _open_overview()
+        at.run()
+        at.radio(key="overview_scope").set_value("Capital & financing").run()
+        capital_scope = mock_get.call_args.kwargs["scope"]
+        at.radio(key="overview_scope").set_value("Everything").run()
+        everything_scope = mock_get.call_args.kwargs["scope"]
+
+    assert not at.exception
+    assert (capital_scope, everything_scope) == ("capital", "all")

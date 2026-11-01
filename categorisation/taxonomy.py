@@ -17,7 +17,7 @@ category got `Property Purchase`.
 """
 
 TAXONOMY: dict[str, list[str]] = {
-    "Income": ["Salary", "Interest", "Dividends & Distributions", "Rental Income", "Tax Refund", "Government Rebate", "Property Sale Proceeds", "Investment Sale Proceeds", "Other"],
+    "Income": ["Salary", "Interest", "Dividends & Distributions", "Rental Income", "Tax Refund", "Government Rebate", "Property Sale Proceeds", "Investment Sale Proceeds", "Loan Drawdown", "Other"],
     "Housing": ["Rent", "Mortgage EMI", "Home Insurance", "Utility Bills", "Maintenance/Content"],
     "Groceries": [],
     "Cafes & Restaurants": ["Restaurants & Takeaway", "Cafes & Coffee"],
@@ -29,10 +29,10 @@ TAXONOMY: dict[str, list[str]] = {
     "Insurance": ["Life/TPD/Income Protection", "Critical Illness", "Content (non-home)"],
     "Kids & Family": ["School Fees", "Childcare", "Activities", "Pocket Money", "Other"],
     "Gifts & Donations": ["Gifts", "Donations"],
-    "Loans & Finance": ["Loan Repayment", "Loan Interest", "Financial Advice Fees"],
+    "Loans & Finance": ["Loan Repayment", "Loan Paydown", "Loan Interest", "Financial Advice Fees"],
     "Services & Subscriptions": ["Phone & Internet", "Media/Streaming", "Other"],
     "Government & Tax": ["Tax Paid", "Government Fees"],
-    "Investment": ["Property Purchase"],
+    "Investment": ["Property Purchase", "Share Portfolio Contribution", "Super Contribution"],
     "Miscellaneous": [],
 }
 

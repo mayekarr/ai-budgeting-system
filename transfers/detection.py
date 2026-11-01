@@ -25,10 +25,11 @@ import re
 from datetime import date as date_type, timedelta
 from typing import Optional
 
-from sqlalchemy import and_, func
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from backend.models import Account, AccountAlias, Transaction, TransferGroup
+from categorisation.capital_events import CAPITAL_INCOME_SUBCATEGORIES, is_capital_event
 from backend.needs_review_reasons import TRANSFER_MATCH, should_supersede
 from transfers.aliases import alias_matches_text
 
@@ -48,8 +49,10 @@ _NEVER_HEURISTIC_SUBCATEGORIES = ("Tax Refund", "Rental Income")
 
 
 def is_never_transfer(tx: Transaction) -> bool:
-    """A confident Income classification (ATO refund, rent) that no transfer match may overwrite."""
-    return tx.category == "Income" and tx.subcategory in _NEVER_HEURISTIC_SUBCATEGORIES
+    """A confident classification (ATO refund, rent, a capital event) that no transfer match may overwrite."""
+    if tx.category == "Income" and tx.subcategory in _NEVER_HEURISTIC_SUBCATEGORIES:
+        return True
+    return is_capital_event(tx.category, tx.subcategory)
 
 
 def _find_account_via_alias_in_text(session: Session, text: str, exclude_account_id: int) -> Optional[int]:
@@ -236,9 +239,18 @@ def _find_tier2_candidates(session: Session, tx: Transaction) -> list[tuple[Tran
             # nullable, and `~and_(category == 'Income', ...)` evaluates to NULL (not TRUE) for a
             # row with a NULL category — which a WHERE clause silently drops, wrongly excluding
             # every plain uncategorised row instead of only the ATO ones.
-            ~and_(
-                func.coalesce(Transaction.category, "") == "Income",
-                func.coalesce(Transaction.subcategory, "").in_(_NEVER_HEURISTIC_SUBCATEGORIES),
+            ~or_(
+                and_(
+                    func.coalesce(Transaction.category, "") == "Income",
+                    func.coalesce(Transaction.subcategory, "").in_(
+                        _NEVER_HEURISTIC_SUBCATEGORIES + CAPITAL_INCOME_SUBCATEGORIES
+                    ),
+                ),
+                func.coalesce(Transaction.category, "") == "Investment",
+                and_(
+                    func.coalesce(Transaction.category, "") == "Loans & Finance",
+                    func.coalesce(Transaction.subcategory, "") == "Loan Paydown",
+                ),
             ),
         )
         .all()

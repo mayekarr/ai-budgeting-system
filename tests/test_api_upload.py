@@ -405,7 +405,7 @@ def test_upload_without_seam_repeats_reports_zero_dropped(client):
     assert response.json()["seam_repeats_dropped"] == 0
 
 
-def test_upload_types_loan_drawdowns_and_paydowns_as_transfer_but_not_instalments(client):
+def test_upload_files_loan_drawdowns_and_paydowns_as_capital_events_but_not_instalments(client):
     csv = (
         "Date,Amount,Account Number,Transaction Type,Transaction Details,Balance,Category,Merchant Name,Processed On\n"
         "2025-09-08,900000.00,147912573,MISCELLANEOUS CREDIT,LOAN PROCEEDS FROM A/C 34-188-5257,950000.00,,,\n"
@@ -421,19 +421,21 @@ def test_upload_types_loan_drawdowns_and_paydowns_as_transfer_but_not_instalment
 
         by_desc = {t.raw_description: t for t in session.query(Transaction)}
     drawdown = by_desc["LOAN PROCEEDS FROM A/C 34-188-5257"]
-    assert drawdown.type == "Transfer"
-    # Its category no longer matters, so no category flag is left. The only flag it can carry is
-    # the new account's own unrecognised_account (first row on an unseen account).
+    assert (drawdown.type, drawdown.category, drawdown.subcategory) == ("Income", "Income", "Loan Drawdown")
+    # The only flag it can carry is the new account's own unrecognised_account.
     assert drawdown.needs_review_reason in (None, "unrecognised_account")
     paydown = by_desc["ONLINE N8131366871 JC to Barkly HL MAYEKAR A"]
-    assert paydown.type == "Transfer"
+    assert (paydown.type, paydown.category, paydown.subcategory) == ("Expense", "Loans & Finance", "Loan Paydown")
     assert paydown.needs_review is False
-    assert by_desc["LOAN REPAYMENT TO A/C 703206283 MAYEKAR A"].type == "Expense"
-    assert client.get("/summary").json()["total_income"] == 0  # the $900,000 no longer counts as income
+    instalment = by_desc["LOAN REPAYMENT TO A/C 703206283 MAYEKAR A"]
+    assert (instalment.type, instalment.subcategory) == ("Expense", "Loan Repayment")
+    # Day-to-day totals leave the drawdown and the paydown out; "everything" has both.
+    assert client.get("/summary?scope=operating").json()["total_income"] == 0
+    assert client.get("/summary?scope=all").json()["total_income"] == 900000.0
 
 
 def test_loan_movement_is_never_left_flagged_as_a_refund(client, monkeypatch):
-    # A Transfer cannot be a refund, even if the refund rules also fired on the same credit.
+    # A loan drawdown cannot be a refund, even if the refund rules also fired on the same credit.
     from transfers.refunds import RefundDecision
 
     monkeypatch.setattr(
@@ -450,12 +452,12 @@ def test_loan_movement_is_never_left_flagged_as_a_refund(client, monkeypatch):
         from backend.models import Transaction
 
         tx = session.query(Transaction).one()
-    assert tx.type == "Transfer"
+    assert tx.type == "Income" and tx.subcategory == "Loan Drawdown"
     assert tx.is_refund is False
 
 
 def test_loan_movement_does_not_keep_a_refund_ambiguity_flag(client, monkeypatch):
-    # The flag is moot once the row is a Transfer; the backfill clears it, so upload must too.
+    # The flag is moot once the row is a loan drawdown, so upload must not keep it.
     from transfers.refunds import RefundDecision
 
     monkeypatch.setattr(
@@ -473,7 +475,7 @@ def test_loan_movement_does_not_keep_a_refund_ambiguity_flag(client, monkeypatch
         from backend.models import Transaction
 
         loan = session.query(Transaction).filter_by(raw_description="LOAN PROCEEDS FROM A/C 34-188-5257").one()
-    assert loan.type == "Transfer"
+    assert loan.type == "Income"
     assert loan.needs_review_reason != "refund_ambiguity"
 
 
@@ -517,7 +519,7 @@ def test_upload_still_pairs_a_card_payment_with_its_counterpart_when_both_are_pr
     assert len({r["transfer_group_id"] for r in rows}) == 1 and rows[0]["transfer_group_id"] is not None
 
 
-def test_upload_types_an_mlc_mkis_contribution_as_transfer_but_not_the_sale_payout(client):
+def test_upload_files_an_mlc_mkis_contribution_under_investment_but_not_the_sale_payout(client):
     csv = (
         _UPLOAD_HEADER
         + "2022-04-06,-750.00,147912573,DEBIT,30774608 0003 MLC MKIS Rohan & Anila Ma,1000.00,,,\n"
@@ -525,5 +527,8 @@ def test_upload_types_an_mlc_mkis_contribution_as_transfer_but_not_the_sale_payo
     )
     assert _upload(client, csv).status_code == 201
     rows = {r["amount"]: r for r in client.get("/transactions").json()}
-    assert rows[-750.0]["type"] == "Transfer" and rows[-750.0]["category"] is None
+    contribution = rows[-750.0]
+    assert (contribution["type"], contribution["category"], contribution["subcategory"]) == (
+        "Expense", "Investment", "Share Portfolio Contribution")
     assert rows[284903.24]["type"] == "Income"
+    assert rows[284903.24]["subcategory"] != "Share Portfolio Contribution"

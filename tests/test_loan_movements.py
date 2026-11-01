@@ -1,13 +1,8 @@
 from __future__ import annotations
 
-from datetime import date
-
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
 
-from backend.models import Account, Base, Transaction
-from transfers.loan_movements import is_loan_movement, reclassify_loan_movements
+from transfers.loan_movements import is_loan_movement
 
 
 @pytest.mark.parametrize(
@@ -55,82 +50,3 @@ def test_sign_must_match_the_kind_of_movement():
     # Money coming out of a loan is a credit; a paydown is a debit.
     assert is_loan_movement("LOAN PROCEEDS FROM A/C 34-188-5257", -900000.00) is False
     assert is_loan_movement("ONLINE N8131366871 JC to Barkly HL MAYEKAR A", 582076.00) is False
-
-
-@pytest.fixture()
-def session():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(bind=engine)
-    with Session(engine) as s:
-        account = Account(name="JC")
-        s.add(account)
-        s.commit()
-        s.info["account_id"] = account.id
-        yield s
-
-
-def _tx(session, description, amount, *, type_, reason=None, d=date(2025, 9, 8), **extra):
-    tx = Transaction(
-        account_id=session.info["account_id"], date=d, amount=amount, raw_description=description,
-        type=type_, category="Miscellaneous", needs_review=reason is not None,
-        needs_review_reason=reason, **extra,
-    )
-    session.add(tx)
-    session.commit()
-    return tx
-
-
-def test_reclassify_turns_existing_loan_movements_into_transfers_and_clears_moot_flags(session):
-    drawdown = _tx(session, "LOAN PROCEEDS FROM A/C 34-188-5257", 900000.00, type_="Income", reason="llm_unavailable")
-    paydown = _tx(
-        session, "ONLINE N8131366871 JC to Barkly HL MAYEKAR A", -582076.00, type_="Expense", reason="llm_unavailable"
-    )
-    instalment = _tx(
-        session, "LOAN INSTALMENT TO A/C 399934242 MAYEKAR", -244.89, type_="Expense", reason="llm_unavailable"
-    )
-
-    changed = reclassify_loan_movements(session)
-
-    assert changed == 2
-    assert (drawdown.type, drawdown.needs_review, drawdown.needs_review_reason) == ("Transfer", False, None)
-    assert (paydown.type, paydown.needs_review, paydown.needs_review_reason) == ("Transfer", False, None)
-    assert (instalment.type, instalment.needs_review_reason) == ("Expense", "llm_unavailable")
-
-
-def test_reclassify_is_idempotent(session):
-    _tx(session, "LOAN PROCEEDS FROM A/C 34-188-5257", 900000.00, type_="Income")
-
-    assert reclassify_loan_movements(session) == 1
-    assert reclassify_loan_movements(session) == 0
-
-
-def test_reclassify_keeps_an_unrecognised_account_flag(session):
-    # About the account's identity, not this row's classification, so it is never cleared.
-    tx = _tx(session, "LOAN PROCEEDS FROM A/C 34-188-5257", 900000.00, type_="Income", reason="unrecognised_account")
-
-    reclassify_loan_movements(session)
-
-    assert tx.type == "Transfer"
-    assert tx.needs_review_reason == "unrecognised_account"
-    assert tx.needs_review is True
-
-
-def test_reclassify_ignores_superseded_and_already_transfer_rows(session):
-    settled = _tx(session, "ONLINE X JC to Barkly HL MAYEKAR A", -100.00, type_="Expense")
-    pending = _tx(session, "ONLINE X JC to Barkly HL MAYEKAR A", -100.00, type_="Expense", superseded_by_id=settled.id)
-    linked = _tx(session, "LOAN PROCEEDS FROM A/C 34-188-5257", 5.00, type_="Transfer")
-
-    assert reclassify_loan_movements(session) == 1  # only the settled row
-    assert pending.type == "Expense"
-    assert linked.type == "Transfer"
-
-
-def test_reclassify_also_clears_the_stale_category_like_the_upload_path(session):
-    account_id = session.info["account_id"]
-    tx = Transaction(account_id=account_id, date=date(2025, 9, 8), amount=900000.0,
-                     raw_description="LOAN PROCEEDS FROM A/C 34-188-5257", type="Income",
-                     category="Income", subcategory="Other")
-    session.add(tx)
-    session.commit()
-    assert reclassify_loan_movements(session) == 1
-    assert tx.type == "Transfer" and tx.category is None and tx.subcategory is None

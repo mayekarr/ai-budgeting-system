@@ -18,9 +18,6 @@ safe: GET /summary and the Portfolio queries exclude by `type`, not by group.
 
 import re
 
-from sqlalchemy.orm import Session
-
-from transfers.lone_transfers import reclassify_where
 
 _DRAWDOWN_RE = re.compile(r"\b(?:LOAN|REDRAW) PROCEEDS FROM A/C\b", re.IGNORECASE)
 # "<own account nickname> to <loan name> HL", e.g. "JC to Barkly HL": a two-letter upper-case
@@ -35,12 +32,3 @@ def is_loan_movement(raw_description: str, amount: float) -> bool:
     if amount < 0:
         return _PAYDOWN_RE.search(raw_description) is not None
     return False
-
-
-def reclassify_loan_movements(session: Session) -> int:
-    """
-    Type already-stored loan movements as `Transfer` (the upload path does this for new rows), clearing
-    the moot category and any review flag a transfer link would also clear; `unrecognised_account` is
-    about the account, so it stays. Idempotent. The caller commits. Returns how many rows changed.
-    """
-    return reclassify_where(session, is_loan_movement)

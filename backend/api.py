@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date as date_type
-from typing import Generator, List, Optional
+from typing import Literal, Generator, List, Optional
 
 import logging
 from contextlib import asynccontextmanager
@@ -17,6 +17,7 @@ from assets.service import AliasInUseError, asset_cash_flows, asset_transactions
 from categorisation.bank_category import categorise_from_bank_category
 from categorisation.claude_fallback import categorise_with_fallback
 from categorisation.rules import match_rule
+from categorisation.capital_events import classify_capital_event, is_capital_event
 from categorisation.seed_rules import seed_rules_if_empty
 from categorisation.taxonomy import is_valid_category
 from ingestion.account_resolution import resolve_account
@@ -29,7 +30,6 @@ from transfers.detection import (
 )
 from transfers.card_payments import is_card_payment
 from transfers.lone_transfers import mark_as_lone_transfer
-from transfers.text_transfers import is_text_only_transfer
 from transfers.refunds import detect_refund
 
 from .database import SessionLocal, bulk_save_transactions, create_tables, engine  # noqa: F401  (engine kept for test monkeypatching)
@@ -298,18 +298,20 @@ async def upload_transactions(
             tx_type = "Income"
             cat_needs_review = False
 
-        if is_text_only_transfer(row.raw_description, row.amount):
-            # A drawdown/redraw or lump-sum loan paydown moves the user's own borrowed money
-            # (FR-9f/FR-9i). The loan statement isn't imported, so detection can't pair it; the
-            # text alone decides. Its category no longer matters, so a category flag is moot.
-            # (A share-portfolio contribution, MLC MKIS, is typed the same way.)
-            tx_type = "Transfer"
-            category, subcategory = None, None
-            cat_needs_review = False
+        # A loan drawdown or paydown, or a share-portfolio contribution, is decided by its text
+        # alone: the loan/MLC statements aren't imported, so there is no counterpart to pair with.
+        # They are capital events (Income / Loans & Finance / Investment), not Transfers, so a
+        # refund flag or a category flag is moot for them.
+        capital_tag = classify_capital_event(row.raw_description, row.amount)
+        if capital_tag is not None:
+            tx_type, category, subcategory = capital_tag.type, capital_tag.category, capital_tag.subcategory
+            confidence, cat_needs_review = 1.0, False
 
-        # A Transfer is neither a refund nor refund-ambiguous, whatever the refund rules saw.
-        is_refund = refund_decision.is_refund and tx_type != "Transfer"
-        refund_needs_review = refund_decision.needs_review and tx_type != "Transfer"
+        # A Transfer or a capital event is neither a refund nor refund-ambiguous, whatever the
+        # refund rules saw.
+        settled_by_text = tx_type == "Transfer" or capital_tag is not None
+        is_refund = refund_decision.is_refund and not settled_by_text
+        refund_needs_review = refund_decision.needs_review and not settled_by_text
 
         # Priority when more than one signal is ambiguous at once, per the single shared table in
         # backend/needs_review_reasons.py (also consulted by transfers/detection.py's later
@@ -667,10 +669,12 @@ def get_summary(
     date_from: Optional[date_type] = Query(default=None),
     date_to: Optional[date_type] = Query(default=None),
     account_id: Optional[int] = Query(default=None),
+    scope: Literal["all", "operating", "capital"] = Query(default="all"),
 ) -> SummaryOut:
     """
     Income vs. expense over a period (J2, plus J7's Tax Refund filter as a category=Income query),
-    excluding Transfer-typed and superseded rows.
+    excluding Transfer-typed and superseded rows. `scope` splits day-to-day (operating) from capital &
+    financing events (property sale/purchase, contributions, loan drawdowns/paydowns); `all` is both.
 
     Buckets by `category`, not `type`: every income source (Salary, Interest, Tax Refund, ...) is
     seeded under the `Income` category (categorisation/taxonomy.py), while a genuine refund keeps
@@ -693,6 +697,9 @@ def get_summary(
     category_raw_totals: dict[str, float] = {}
     income_raw_totals: dict[str, float] = {}
     for tx in q.all():
+        # operating = day-to-day; capital = sale/purchase, contributions, drawdowns, paydowns.
+        if scope != "all" and is_capital_event(tx.category, tx.subcategory) != (scope == "capital"):
+            continue
         if tx.category == "Income":
             total_income += tx.amount
             income_label = tx.subcategory or "Uncategorized"

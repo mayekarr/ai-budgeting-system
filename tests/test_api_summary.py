@@ -270,3 +270,40 @@ def test_by_year_category_only_groups_the_whole_category(client):
 def test_by_year_requires_a_category(client):
     api_client, _, _ = client
     assert api_client.get("/summary/by-year").status_code == 422
+
+
+def test_summary_scope_splits_day_to_day_from_capital_and_financing(client):
+    test_client, SessionLocal, account_id = client
+    _seed(SessionLocal, account_id, category="Groceries", amount=-100.0)
+    _seed(SessionLocal, account_id, category="Income", subcategory="Salary", amount=5000.0, type="Income")
+    _seed(SessionLocal, account_id, category="Loans & Finance", subcategory="Loan Repayment", amount=-6000.0)
+    # capital & financing
+    _seed(SessionLocal, account_id, category="Income", subcategory="Loan Drawdown", amount=900000.0, type="Income")
+    _seed(SessionLocal, account_id, category="Income", subcategory="Property Sale Proceeds", amount=181913.34,
+          type="Income")
+    _seed(SessionLocal, account_id, category="Investment", subcategory="Share Portfolio Contribution", amount=-750.0)
+    _seed(SessionLocal, account_id, category="Loans & Finance", subcategory="Loan Paydown", amount=-582076.0)
+
+    operating = test_client.get("/summary?scope=operating").json()
+    capital = test_client.get("/summary?scope=capital").json()
+    everything = test_client.get("/summary?scope=all").json()
+
+    assert (operating["total_income"], operating["total_expense"]) == (5000.0, 6100.0)
+    assert [c["category"] for c in operating["by_category"]] == ["Loans & Finance", "Groceries"]
+    assert capital["total_income"] == pytest.approx(1081913.34)
+    assert capital["total_expense"] == pytest.approx(582826.0)
+    assert {c["category"] for c in capital["by_income_category"]} == {"Loan Drawdown", "Property Sale Proceeds"}
+    assert everything["total_income"] == pytest.approx(operating["total_income"] + capital["total_income"])
+    assert everything["total_expense"] == pytest.approx(operating["total_expense"] + capital["total_expense"])
+
+
+def test_summary_without_a_scope_keeps_returning_everything(client):
+    test_client, SessionLocal, account_id = client
+    _seed(SessionLocal, account_id, category="Groceries", amount=-100.0)
+    _seed(SessionLocal, account_id, category="Investment", subcategory="Property Purchase", amount=-147000.0)
+    assert test_client.get("/summary").json()["total_expense"] == 147100.0
+
+
+def test_summary_rejects_an_unknown_scope(client):
+    test_client, _, _ = client
+    assert test_client.get("/summary?scope=nonsense").status_code == 422

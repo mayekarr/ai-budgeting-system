@@ -652,6 +652,11 @@ def test_confident_link_clears_the_stale_category_but_a_medium_link_keeps_it(ses
     ("Income", "Tax Refund", True),
     ("Income", "Rental Income", True),
     ("Income", "Salary", False),
+    ("Income", "Loan Drawdown", True),
+    ("Income", "Property Sale Proceeds", True),
+    ("Loans & Finance", "Loan Paydown", True),
+    ("Loans & Finance", "Loan Repayment", False),
+    ("Investment", "Share Portfolio Contribution", True),
     ("Travel & Holidays", "Other", False),
     (None, None, False),
 ])
@@ -659,3 +664,19 @@ def test_is_never_transfer_covers_only_confident_income(category, subcategory, e
     from transfers.detection import is_never_transfer
     tx = Transaction(category=category, subcategory=subcategory)
     assert is_never_transfer(tx) is expected
+
+
+def test_tier2_never_pairs_a_loan_drawdown_with_a_near_equal_debit(session):
+    jc = _account(session, "JC")
+    mac = _account(session, "MAC")
+    drawdown = _tx(session, jc, date(2025, 9, 8), 900000.00, "LOAN PROCEEDS FROM A/C 34-188-5257")
+    drawdown.type, drawdown.category, drawdown.subcategory = "Income", "Income", "Loan Drawdown"
+    other = _tx(session, mac, date(2025, 9, 8), -900000.00, "SOMETHING ELSE")
+    session.commit()
+
+    process_transfer_detection(session, drawdown)
+    process_transfer_detection(session, other)
+
+    session.refresh(drawdown)
+    session.refresh(other)
+    assert drawdown.transfer_group_id is None and other.transfer_group_id is None

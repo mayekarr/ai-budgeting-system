@@ -206,6 +206,9 @@ SEED_RULES: list[dict] = [
     dict(pattern='LOAN INSTALMENT TO A/C', match_type="substring", category='Loans & Finance', subcategory='Loan Repayment', priority=127),
     dict(pattern='MONTH EX LOANREPAY', match_type="substring", category='Loans & Finance', subcategory='Loan Repayment', priority=127),
     dict(pattern='AIR LANKA', match_type="substring", category='Travel & Holidays', subcategory='Flights', priority=108),
+    # Extra super contributions (Rohan, 2026-11-01): money moved into an investment that is not
+    # spendable again, so an Investment outflow rather than a Transfer.
+    dict(pattern='MLC SUPER', match_type="substring", category='Investment', subcategory='Super Contribution', priority=126),
     # Real, unambiguous merchants reported live by Rohan, each independently confirmed against the
     # real xlsx's own bank Category/Merchant Name columns (Donations/Oxfam Australia; Insurance/
     # Allianz Insurance) -- see the "using bank Category/Merchant Name" note in docs/next-steps.md.

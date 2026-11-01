@@ -362,3 +362,9 @@ def test_extra_repayment_rule_is_specific_to_the_monthly_payment_wording(session
     assert match_rule(session, "ONLINE G5538115221 Month ex loanrepay MAYEKAR A") is not None
     other = match_rule(session, "Payment ref ex loanrepay for J Smith")
     assert other is None or other.subcategory != "Loan Repayment"
+
+
+def test_mlc_super_contribution_is_filed_under_investment(session):
+    seed_rules_if_empty(session)
+    match = match_rule(session, "INTERNET BPAY MLC Super 5088723914")
+    assert (match.category, match.subcategory) == ("Investment", "Super Contribution")

@@ -12,6 +12,12 @@ from frontend.date_ranges import PRESETS, resolve_date_range
 st.set_page_config(page_title="Overview", layout="wide")
 st.title("Overview")
 
+# Day-to-day (salary, rent, spending) is kept apart from capital & financing events (property sale
+# and purchase, share/super contributions, loan drawdowns and paydowns), so one $582k paydown
+# doesn't swamp a month of spending. The labels map to GET /summary's `scope`.
+SCOPES = {"Day-to-day": "operating", "Capital & financing": "capital", "Everything": "all"}
+scope_label = st.radio("Show", list(SCOPES), horizontal=True, key="overview_scope")
+
 preset = st.selectbox("Date range", PRESETS, key="overview_date_preset")
 date_from, date_to = resolve_date_range(preset, date.today())
 
@@ -56,7 +62,7 @@ def _render_tax_refund_yoy() -> None:
 
 
 try:
-    summary = get_summary(date_from=date_from, date_to=date_to)
+    summary = get_summary(date_from=date_from, date_to=date_to, scope=SCOPES[scope_label])
 except Exception as exc:  # pylint: disable=broad-except
     st.error(f"Could not load summary: {exc}")
     _render_tax_refund_yoy()
