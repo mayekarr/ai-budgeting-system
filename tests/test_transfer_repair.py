@@ -118,3 +118,44 @@ def test_a_second_run_changes_nothing(session, world):
     assert again["dissolved_groups"] == 1 or again["dissolved_groups"] == 0   # only the rebuilt Tier-2 pair
     out, inn = world["real"]
     assert out.transfer_group_id == inn.transfer_group_id
+
+
+# --- relinking rows that lost their pair (e.g. a whole group unlinked by one click) ---------------
+
+from transfers.repair import relink_by_reference
+
+
+def test_relink_pairs_unlinked_rows_that_share_a_reference_and_an_exact_amount(session):
+    jc, ac = _acct(session, "JC"), _acct(session, "AC")
+    d = date(2026, 5, 11)
+    out = _tx(session, jc, d, -30.0, "ONLINE N6414309103 Arvan food MAYEKAR A", "TRANSFER DEBIT")
+    inn = _tx(session, ac, d, 30.0, "ONLINE N6414309103 Arvan food MAYEKAR A", "TRANSFER CREDIT", type="Income")
+    session.commit()
+
+    assert relink_by_reference(session) == 2
+    assert out.transfer_group_id == inn.transfer_group_id is not None
+    assert session.get(TransferGroup, out.transfer_group_id).detection_tier == 1
+
+
+def test_relink_never_pairs_on_amount_alone_or_across_a_purchase_or_a_near_miss(session):
+    jc, ac, cc = _acct(session, "JC"), _acct(session, "AC"), _acct(session, "CC")
+    d = date(2026, 5, 11)
+    amount_only_a = _tx(session, jc, d, -100.0, "SOMETHING OUT", "TRANSFER DEBIT")
+    amount_only_b = _tx(session, ac, d, 100.0, "SOMETHING IN", "TRANSFER CREDIT", type="Income")
+    near_a = _tx(session, jc, d, -20.0, "ONLINE Q2222222222 gift", "TRANSFER DEBIT")
+    near_b = _tx(session, ac, d, 20.5, "ONLINE Q2222222222 gift", "TRANSFER CREDIT", type="Income")
+    purchase = _tx(session, cc, d, -30.0, "ONLINE N6414309103 NANDOS", "CREDIT CARD PURCHASE")
+    session.commit()
+
+    assert relink_by_reference(session) == 0
+    for tx in (amount_only_a, amount_only_b, near_a, near_b, purchase):
+        assert tx.transfer_group_id is None
+
+
+def test_relink_is_idempotent(session):
+    jc, ac = _acct(session, "JC"), _acct(session, "AC")
+    _tx(session, jc, date(2026, 5, 11), -30.0, "ONLINE N6414309103 Arvan food", "TRANSFER DEBIT")
+    _tx(session, ac, date(2026, 5, 11), 30.0, "ONLINE N6414309103 Arvan food", "TRANSFER CREDIT", type="Income")
+    session.commit()
+    relink_by_reference(session)
+    assert relink_by_reference(session) == 0

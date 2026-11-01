@@ -19,7 +19,7 @@ from backend.models import Transaction, TransferGroup
 from backend.needs_review_reasons import TRANSFER_MATCH
 from categorisation.rules import first_matching_rule, load_active_rules
 from transfers.card_payments import reclassify_card_payments
-from transfers.detection import process_transfer_detection
+from transfers.detection import is_never_transfer, process_transfer_detection
 from transfers.own_accounts import reclassify_own_account_transfers
 
 Restore = dict[int, tuple[Optional[str], Optional[str]]]
@@ -77,3 +77,27 @@ def rebuild_transfer_groups(session: Session, restore_categories: Optional[Resto
         "own_account_transfers": own_account,
         "card_payments_unpaired": card_payments,
     }
+
+
+def relink_by_reference(session: Session) -> int:
+    """
+    Pair rows that have lost their pair but still share an account number or reference with an exact
+    opposite amount on another account (Tier 1 only; never on amount alone). Needed when one click
+    unlinked a whole group, or after any other unlink: the rows were no longer in a group, so no rebuild
+    would look at them. Safe to re-run; returns how many rows were linked.
+    """
+    rows = (
+        session.query(Transaction)
+        .filter(
+            Transaction.superseded_by_id.is_(None),
+            Transaction.transfer_group_id.is_(None),
+            Transaction.type != "Transfer",
+        )
+        .order_by(Transaction.date, Transaction.id)
+        .all()
+    )
+    rows = [tx for tx in rows if not is_never_transfer(tx)]
+    for tx in rows:
+        process_transfer_detection(session, tx, tiers=(1,))
+    session.flush()
+    return sum(1 for tx in rows if tx.transfer_group_id is not None)
