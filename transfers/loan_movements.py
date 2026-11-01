@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 """
-Loan movements that are `Transfer`s (docs/product-requirements.md FR-9f, FR-9i): borrowed money
-moving between the user's own accounts, not earnings or spending.
-
-  - A drawdown or redraw is a credit worded `LOAN PROCEEDS FROM A/C …` / `REDRAW PROCEEDS FROM A/C …`.
-  - A lump-sum paydown is a debit to one of the user's home loans, worded `… to <name> HL`
+Loan movements decided by their text (docs/product-requirements.md FR-9l, which superseded FR-9f/FR-9i):
+  - a drawdown or redraw is a credit worded `LOAN PROCEEDS FROM A/C ...` / `REDRAW PROCEEDS FROM A/C ...`;
+  - a lump-sum paydown is a debit to one of the user's home loans, worded `... to <name> HL`
     (e.g. `JC to Barkly HL`).
 
-Regular instalments, repayments and interest are deliberately *not* matched: they stay `Expense`
-(J6's cash-flow view, because they include interest).
+These are only *recognised* here. `categorisation/capital_events.py` files a drawdown as
+`Income / Loan Drawdown` and a paydown as `Loans & Finance / Loan Paydown`: borrowed money coming in and
+debt being paid down are real flows, kept out of day-to-day totals by the Overview scope switch rather
+than hidden as Transfers.
 
-The loan's own statement isn't imported, so there is no counterpart row to pair with and transfer
-detection can't type these. They are recognised from the text alone, with no TransferGroup. That is
-safe: GET /summary and the Portfolio queries exclude by `type`, not by group.
+Regular instalments, repayments and interest are deliberately *not* matched: they stay ordinary
+`Loan Repayment` / `Loan Interest` expenses (J6's cash-flow view, because they include interest).
+
+The loan's own statement isn't imported, so there is no counterpart row and transfer detection can't
+pair these anyway.
 """
 
 import re

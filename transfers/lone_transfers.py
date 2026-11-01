@@ -1,8 +1,8 @@
 """
 Shared helpers for rows that are `Transfer`s by their text alone, with no counterpart row and so no
-TransferGroup: loan movements, card payments whose other leg isn't imported yet, and share-portfolio
-contributions. Each kind has its own predicate (`is_loan_movement`, `is_card_payment`,
-`is_investment_contribution`); typing a matching row and sweeping stored rows are done here once.
+TransferGroup: today that is card payments whose other leg isn't imported yet (`is_card_payment`).
+(Loan drawdowns/paydowns and share contributions used to be here; they are capital events now, see
+categorisation/capital_events.py.) Typing a matching row and sweeping stored rows are done here once.
 
 Safe without a group: GET /summary and the Portfolio queries exclude by `type`, not by group.
 """

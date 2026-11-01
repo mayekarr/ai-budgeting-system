@@ -260,25 +260,33 @@ async def upload_transactions(
     for row in parsed_rows:
         resolved = resolve_account(db, row.account_identifier)
 
-        rule_match = match_rule(db, row.raw_description)
-        bank_derived = None if rule_match is not None else categorise_from_bank_category(row.raw_bank_category)
-        if rule_match is not None:
-            category, subcategory, confidence, cat_needs_review, cat_review_reason = (
-                rule_match.category, rule_match.subcategory, rule_match.confidence, False, None,
-            )
-        elif bank_derived is not None:
-            # A rule (including a user correction) always wins when one exists; this is a second,
-            # more general line of defence for whatever no rule covers yet, using the bank's own
-            # Category field (categorisation/bank_category.py) instead of falling straight through
-            # to the LLM fallback (permanently unavailable for this user, §4.3.1).
-            category, subcategory = bank_derived
+        # A loan drawdown/paydown or a share-portfolio contribution is decided by its text alone
+        # (the loan/MLC statements aren't imported, so nothing can pair with it). Deciding that first
+        # means the rules, the bank category and the LLM fallback are not consulted for it at all.
+        capital_tag = classify_capital_event(row.raw_description, row.amount)
+        if capital_tag is not None:
+            category, subcategory = capital_tag.category, capital_tag.subcategory
             confidence, cat_needs_review, cat_review_reason = 1.0, False, None
         else:
-            fallback = categorise_with_fallback(db, row.raw_description)
-            category, subcategory, confidence, cat_needs_review, cat_review_reason = (
-                fallback.category, fallback.subcategory, fallback.confidence, fallback.needs_review,
-                fallback.reason,
-            )
+            rule_match = match_rule(db, row.raw_description)
+            bank_derived = None if rule_match is not None else categorise_from_bank_category(row.raw_bank_category)
+            if rule_match is not None:
+                category, subcategory, confidence, cat_needs_review, cat_review_reason = (
+                    rule_match.category, rule_match.subcategory, rule_match.confidence, False, None,
+                )
+            elif bank_derived is not None:
+                # A rule (including a user correction) always wins when one exists; this is a second,
+                # more general line of defence for whatever no rule covers yet, using the bank's own
+                # Category field (categorisation/bank_category.py) instead of falling straight through
+                # to the LLM fallback (permanently unavailable for this user, §4.3.1).
+                category, subcategory = bank_derived
+                confidence, cat_needs_review, cat_review_reason = 1.0, False, None
+            else:
+                fallback = categorise_with_fallback(db, row.raw_description)
+                category, subcategory, confidence, cat_needs_review, cat_review_reason = (
+                    fallback.category, fallback.subcategory, fallback.confidence, fallback.needs_review,
+                    fallback.reason,
+                )
 
         refund_decision = detect_refund(
             db,
@@ -298,14 +306,8 @@ async def upload_transactions(
             tx_type = "Income"
             cat_needs_review = False
 
-        # A loan drawdown or paydown, or a share-portfolio contribution, is decided by its text
-        # alone: the loan/MLC statements aren't imported, so there is no counterpart to pair with.
-        # They are capital events (Income / Loans & Finance / Investment), not Transfers, so a
-        # refund flag or a category flag is moot for them.
-        capital_tag = classify_capital_event(row.raw_description, row.amount)
         if capital_tag is not None:
-            tx_type, category, subcategory = capital_tag.type, capital_tag.category, capital_tag.subcategory
-            confidence, cat_needs_review = 1.0, False
+            tx_type = capital_tag.type  # Income / Expense by the kind of event, not just the sign
 
         # A Transfer or a capital event is neither a refund nor refund-ambiguous, whatever the
         # refund rules saw.

@@ -112,7 +112,9 @@ def apply_capital_tag(tx: Transaction, tag: CapitalTag) -> None:
 def reclassify_capital_events(session: Session) -> int:
     """
     Apply the text-decided tags to stored rows, including ones earlier typed `Transfer` (the old
-    behaviour). Rows in a transfer group are real pairs and are never touched. Idempotent; the
+    behaviour). Rows in a transfer group are real pairs and are never touched, and neither is a row
+    already given a real category (a hand correction, or a rule that placed it): only rows with no
+    category, `Miscellaneous`, or the old groupless Transfer typing are swept. Idempotent; the
     caller commits. Returns how many rows changed.
     """
     rows = (
@@ -126,6 +128,8 @@ def reclassify_capital_events(session: Session) -> int:
         if tag is None:
             continue
         if (tx.type, tx.category, tx.subcategory) == (tag.type, tag.category, tag.subcategory):
+            continue
+        if tx.type != "Transfer" and tx.category not in (None, "Miscellaneous"):
             continue
         apply_capital_tag(tx, tag)
         changed += 1

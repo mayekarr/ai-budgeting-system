@@ -532,3 +532,17 @@ def test_upload_files_an_mlc_mkis_contribution_under_investment_but_not_the_sale
         "Expense", "Investment", "Share Portfolio Contribution")
     assert rows[284903.24]["type"] == "Income"
     assert rows[284903.24]["subcategory"] != "Share Portfolio Contribution"
+
+
+def test_upload_does_not_spend_an_llm_call_on_a_row_whose_text_already_decides_it(client, monkeypatch):
+    def boom(*args, **kwargs):
+        raise AssertionError("the LLM fallback must not run for a capital event")
+
+    monkeypatch.setattr(api_module, "categorise_with_fallback", boom)
+    csv = (
+        _UPLOAD_HEADER
+        + "2025-09-08,900000.00,147912573,MISCELLANEOUS CREDIT,LOAN PROCEEDS FROM A/C 34-188-5257,950000.00,,,\n"
+    )
+    assert _upload(client, csv).status_code == 201
+    row = client.get("/transactions").json()[0]
+    assert (row["type"], row["subcategory"]) == ("Income", "Loan Drawdown")

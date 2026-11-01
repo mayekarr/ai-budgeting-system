@@ -168,3 +168,13 @@ def test_apply_scope_filters_a_query_and_rejects_unknown_values(session):
     assert names("capital") == {"b"}
     with pytest.raises(ValueError, match="scope"):
         apply_scope(session.query(Transaction), "Operating")
+
+
+def test_reclassify_does_not_overwrite_a_row_the_user_already_categorised(session):
+    # A hand-corrected row carries a real category; only unplaced rows (no category / Miscellaneous)
+    # and the old groupless Transfer typing are swept.
+    corrected = _tx(session, "ONLINE X JC to Barkly HL MAYEKAR A", -100.0, type="Expense", category="Gifts & Donations")
+    unplaced = _tx(session, "ONLINE Y JC to Barkly HL MAYEKAR A", -100.0, type="Expense", category="Miscellaneous")
+    assert reclassify_capital_events(session) == 1
+    assert corrected.category == "Gifts & Donations"
+    assert unplaced.subcategory == "Loan Paydown"
