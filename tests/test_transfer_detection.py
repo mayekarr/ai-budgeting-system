@@ -646,3 +646,16 @@ def test_confident_link_clears_the_stale_category_but_a_medium_link_keeps_it(ses
     assert a.type == b.type == "Transfer" and a.category is None and b.category is None
     # exact amount but a day apart = Medium: tentative, so the category must survive a rejection
     assert c.type == d.type == "Transfer" and c.category == "Shopping"
+
+
+@pytest.mark.parametrize("category, subcategory, expected", [
+    ("Income", "Tax Refund", True),
+    ("Income", "Rental Income", True),
+    ("Income", "Salary", False),
+    ("Travel & Holidays", "Other", False),
+    (None, None, False),
+])
+def test_is_never_transfer_covers_only_confident_income(category, subcategory, expected):
+    from transfers.detection import is_never_transfer
+    tx = Transaction(category=category, subcategory=subcategory)
+    assert is_never_transfer(tx) is expected

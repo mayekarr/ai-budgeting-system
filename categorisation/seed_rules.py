@@ -217,20 +217,20 @@ SEED_RULES: list[dict] = [
 
 def add_missing_seed_rules(session: Session) -> int:
     """
-    Add any starter rule not already present (matched on pattern + match type among seeded rules).
-    `seed_rules_if_empty` never touches a database that already has rules, so a rule added to
-    SEED_RULES later would otherwise never reach it. Idempotent. Returns how many were added.
+    Add any starter rule not already present (matched on pattern + match type, whatever the rule's
+    source, so a user's own rule for the same text is not duplicated). `seed_rules_if_empty` never
+    touches a database that already has rules, so a rule added to SEED_RULES later would otherwise
+    never reach it. A seeded rule that was *deleted* comes back; deactivate it instead. Idempotent.
+    Flushes only: the caller commits, so a later failure rolls the rules back with the rest.
+    Returns how many were added.
     """
-    existing = {
-        (r.pattern, r.match_type)
-        for r in session.query(CategorisationRule).filter(CategorisationRule.source == "seeded")
-    }
+    existing = {(r.pattern, r.match_type) for r in session.query(CategorisationRule)}
     added = 0
     for rule in SEED_RULES:
         if (rule["pattern"], rule["match_type"]) not in existing:
             session.add(CategorisationRule(source="seeded", is_active=True, **rule))
             added += 1
-    session.commit()
+    session.flush()
     return added
 
 

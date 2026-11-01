@@ -38,6 +38,25 @@ def _matches(rule: CategorisationRule, text: str) -> bool:
     return pattern_matches(rule.pattern, rule.match_type, text)
 
 
+def load_active_rules(session: Session) -> list[CategorisationRule]:
+    """Active rules in match order. Load once and reuse via `first_matching_rule` for a batch."""
+    rules = session.query(CategorisationRule).filter(CategorisationRule.is_active.is_(True)).all()
+    rules.sort(key=lambda r: (_MATCH_TYPE_ORDER.get(r.match_type, 99), r.priority))
+    return rules
+
+
+def first_matching_rule(rules: list[CategorisationRule], raw_description: str) -> Optional[RuleMatch]:
+    for rule in rules:
+        if _matches(rule, raw_description):
+            return RuleMatch(
+                category=rule.category,
+                subcategory=rule.subcategory,
+                confidence=1.0,
+                rule_id=rule.id,
+            )
+    return None
+
+
 def match_rule(session: Session, raw_description: str) -> Optional[RuleMatch]:
     """
     Match a transaction's raw description against active CategorisationRule rows.
@@ -49,15 +68,4 @@ def match_rule(session: Session, raw_description: str) -> Optional[RuleMatch]:
     # Sorted once in Python by (match_type, priority) — that key already fully determines order,
     # so an additional SQL-side ORDER BY on priority alone would be redundant work the Python sort
     # immediately overrides.
-    rules = session.query(CategorisationRule).filter(CategorisationRule.is_active.is_(True)).all()
-    rules.sort(key=lambda r: (_MATCH_TYPE_ORDER.get(r.match_type, 99), r.priority))
-
-    for rule in rules:
-        if _matches(rule, raw_description):
-            return RuleMatch(
-                category=rule.category,
-                subcategory=rule.subcategory,
-                confidence=1.0,
-                rule_id=rule.id,
-            )
-    return None
+    return first_matching_rule(load_active_rules(session), raw_description)

@@ -47,6 +47,11 @@ _TIER2_AMOUNT_TOLERANCE_PCT = 0.01
 _NEVER_HEURISTIC_SUBCATEGORIES = ("Tax Refund", "Rental Income")
 
 
+def is_never_transfer(tx: Transaction) -> bool:
+    """A confident Income classification (ATO refund, rent) that no transfer match may overwrite."""
+    return tx.category == "Income" and tx.subcategory in _NEVER_HEURISTIC_SUBCATEGORIES
+
+
 def _find_account_via_alias_in_text(session: Session, text: str, exclude_account_id: int) -> Optional[int]:
     aliases = session.query(AccountAlias).filter(AccountAlias.account_id != exclude_account_id).all()
     for alias in aliases:
@@ -295,7 +300,7 @@ def _flag_unresolved_tie_losers(others: list[Transaction]) -> None:
 
 
 def _process_tier2(session: Session, tx: Transaction) -> None:
-    if tx.category == "Income" and tx.subcategory in _NEVER_HEURISTIC_SUBCATEGORIES:
+    if is_never_transfer(tx):
         return
     found = _best_tier2_candidate(session, tx)
     if found is None:

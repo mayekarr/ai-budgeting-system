@@ -323,3 +323,19 @@ def test_ordinary_sydney_merchants_are_not_treated_as_reimbursements(session, de
     seed_rules_if_empty(session)
     match = match_rule(session, description)
     assert match is None or match.category != "Travel & Holidays"
+
+
+def test_add_missing_seed_rules_does_not_duplicate_a_rule_the_user_already_made(session):
+    from categorisation.seed_rules import add_missing_seed_rules
+    session.add(CategorisationRule(pattern="P & G REAL ESTAT", match_type="substring", category="Income",
+                                   subcategory="Other", priority=50, source="user_correction", is_active=True))
+    session.commit()
+    add_missing_seed_rules(session)
+    assert session.query(CategorisationRule).filter_by(pattern="P & G REAL ESTAT").count() == 1
+
+
+def test_add_missing_seed_rules_leaves_the_commit_to_the_caller(session):
+    from categorisation.seed_rules import add_missing_seed_rules
+    assert add_missing_seed_rules(session) > 0
+    session.rollback()
+    assert session.query(CategorisationRule).count() == 0

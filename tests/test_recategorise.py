@@ -84,3 +84,12 @@ def test_unconfident_miscellaneous_row_that_lost_its_review_flag_is_also_picked_
     assert recategorise_unreviewed(session) == 1
     session.refresh(tx)
     assert tx.subcategory == "Rental Income"
+
+
+def test_a_flag_with_no_stored_reason_is_not_cleared_by_a_category_match(session):
+    # needs_review=True with no reason is not something this pass knows how to resolve
+    tx = _tx(session, "P & G REAL ESTAT", needs_review_reason=None, confidence_score=0.0)
+    assert recategorise_unreviewed(session) == 1
+    session.refresh(tx)
+    assert tx.subcategory == "Rental Income"
+    assert tx.needs_review is True
