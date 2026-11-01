@@ -159,3 +159,22 @@ def test_a_monthly_direct_debit_is_not_mistaken_for_a_card_payment(env):
     wrong = _add_pair(Session, ids, 2, 1.0, "P0005826535 OXFAM AUSTRALIA Anila Mayekar",
                       "MR AMARNANDAN PERIYAavdesh gift - amar", out_type="AUTOMATIC DRAWING", in_type="TRANSFER CREDIT")
     assert _check_flags(client)[wrong] is True
+
+
+def test_a_group_with_only_one_live_leg_is_listed_as_a_lone_transfer_not_a_one_row_pair(env):
+    client, Session, ids = env
+    with Session() as s:
+        group = TransferGroup(detection_tier=2, confidence=1.0)
+        s.add(group)
+        s.flush()
+        s.add(Transaction(account_id=ids["jc"], date=date(2026, 9, 2), amount=-77.0, raw_description="LIVE LEG",
+                          type="Transfer", transfer_group_id=group.id))
+        s.add(Transaction(account_id=ids["ac"], date=date(2026, 9, 2), amount=77.0, raw_description="GONE LEG",
+                          type="Transfer", transfer_group_id=group.id, superseded_by_id=1))
+        s.commit()
+        group_id = group.id
+
+    body = client.get("/transfers").json()
+
+    assert group_id not in {p["group_id"] for p in body["pairs"]}
+    assert "LIVE LEG" in {l["raw_description"] for l in body["lone"]}

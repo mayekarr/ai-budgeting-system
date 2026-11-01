@@ -60,7 +60,8 @@ def rebuild_transfer_groups(session: Session, restore_categories: Optional[Resto
 
     # Text-decided transfers first, so a debit to Macquarie is never paired with something by coincidence.
     own_account = reclassify_own_account_transfers(session)
-    ordered = sorted(freed, key=lambda t: (t.date, t.id))
+    # Same guard as the upload path: an ATO refund, rent credit or capital event is never made a Transfer.
+    ordered = sorted((t for t in freed if not is_never_transfer(t)), key=lambda t: (t.date, t.id))
     for tx in ordered:
         process_transfer_detection(session, tx, tiers=(1,))
     for tx in ordered:
@@ -68,12 +69,12 @@ def rebuild_transfer_groups(session: Session, restore_categories: Optional[Resto
     card_payments = reclassify_card_payments(session)
     session.flush()
 
-    relinked = sum(1 for tx in ordered if tx.transfer_group_id is not None)
+    relinked = sum(1 for tx in freed if tx.transfer_group_id is not None)
     return {
         "dissolved_groups": len(groups),
         "freed_rows": len(freed),
         "relinked_rows": relinked,
-        "now_ordinary_rows": len(freed) - relinked - own_account - card_payments,
+        "now_ordinary_rows": sum(1 for tx in freed if tx.type != "Transfer"),
         "own_account_transfers": own_account,
         "card_payments_unpaired": card_payments,
     }

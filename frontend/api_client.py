@@ -144,6 +144,7 @@ def _patch_transaction(transaction_id: int, payload: dict) -> dict:
         get_assets.clear()
         get_asset_transactions.clear()
         get_summary_by_year.clear()
+        get_transfers.clear()
 
 
 def correct_transaction_category(

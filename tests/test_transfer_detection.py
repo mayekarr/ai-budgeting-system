@@ -932,3 +932,19 @@ def test_a_row_that_could_never_be_a_transfer_partner_is_not_counted_as_intercha
 
     session.refresh(debits[1])
     assert debits[1].type == "Transfer" and debits[1].needs_review is True
+
+
+def test_a_reference_match_never_takes_a_rent_credit_as_its_partner(session):
+    # The guard protects a rent credit when it is the row being searched on AND when another row finds it.
+    jc = _account(session, "JC")
+    ac = _account(session, "AC")
+    rent = _tx(session, jc, date(2026, 3, 3), 100.00, "ONLINE Q3333333333 rent", "TRANSFER CREDIT")
+    rent.type, rent.category, rent.subcategory = "Income", "Income", "Rental Income"
+    debit = _tx(session, ac, date(2026, 3, 3), -100.00, "ONLINE Q3333333333 rent", "TRANSFER DEBIT")
+    session.commit()
+
+    process_transfer_detection(session, debit)
+
+    session.refresh(rent)
+    session.refresh(debit)
+    assert rent.transfer_group_id is None and debit.transfer_group_id is None

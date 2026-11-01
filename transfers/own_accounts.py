@@ -18,8 +18,12 @@ from sqlalchemy.orm import Session
 
 from transfers.lone_transfers import reclassify_where
 
+# The user's own wording, as it appears on his statements: "JC to Macquarie", "AC to MCA", "JC to Mac CMA",
+# "transfer to mac acc", "Macquarie CM Acc". A payee that merely contains the name ("BPAY to Macquarie
+# University", "Payment to Macquarie Group") has no account nickname in front and is not matched.
 _MACQUARIE_RE = re.compile(
-    r"\bto\s+(?:Macquarie|Mac\s*CMA|Mac\s*Acc|MCA)\b|\bMacquarie\s+CM\s+Acc\b",
+    r"\b(?:JC|AC|RC|transfer)\s+to\s+(?:Macquarie(?!\s+(?:University|Group|Bank|Capital)\b)|Mac\s*CMA|Mac\s*Acc|MCA)\b"
+    r"|\bMacquarie\s+CM\s+Acc\b",
     re.IGNORECASE,
 )
 

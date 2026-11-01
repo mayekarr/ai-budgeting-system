@@ -109,7 +109,8 @@ def _is_available(candidate: Transaction) -> bool:
     in a weaker (Tier-2, amount-and-date) group, which an account-number or reference match overrides.
     A row already in a Tier-1 group is taken.
     """
-    if candidate.superseded_by_id is not None or not can_be_transfer_leg(candidate):
+    # An ATO refund, rent credit or capital event is a deliberate classification: never a partner either.
+    if candidate.superseded_by_id is not None or not can_be_transfer_leg(candidate) or is_never_transfer(candidate):
         return False
     group = candidate.transfer_group
     return group is None or group.detection_tier >= 2
@@ -252,9 +253,10 @@ def _tier2_band(tx_date: date_type, candidate_date: date_type) -> str:
 
 
 def _find_tier2_candidates(session: Session, tx: Transaction) -> list[tuple[Transaction, str]]:
-    """Every opposite-sign, near-equal-amount, in-window candidate on a different account, each
-    tagged with its confidence band (§2.3). §2.1's candidate-pool restriction is automatically
-    satisfied — every Transaction is FK'd to a real Account, so no alias check is needed here."""
+    """Every opposite-sign, exactly-equal-amount, in-window candidate on a different account whose bank
+    type and bank category could be a transfer's, each tagged High (same day) or Medium (within the
+    window). §2.1's candidate-pool restriction is automatically satisfied: every Transaction is FK'd to
+    a real Account, so no alias check is needed here."""
     window_start = _add_business_days(tx.date, -_TIER2_BUSINESS_DAY_WINDOW)
     window_end = _add_business_days(tx.date, _TIER2_BUSINESS_DAY_WINDOW)
     rows = (
@@ -472,5 +474,3 @@ def find_suggested_transfer_match(session: Session, tx: Transaction) -> Optional
         return None
     found = _best_tier2_candidate(session, tx)
     return found[0] if found else None
-
-

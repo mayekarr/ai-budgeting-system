@@ -159,3 +159,34 @@ def test_relink_is_idempotent(session):
     session.commit()
     relink_by_reference(session)
     assert relink_by_reference(session) == 0
+
+
+def test_a_freed_rent_credit_is_never_re_paired_as_a_transfer(session):
+    jc, ac = _acct(session, "JC"), _acct(session, "AC")
+    d = date(2026, 3, 3)
+    g = _group(session, 2, 1.0)
+    rent = _tx(session, jc, d, 100.0, "ONLINE Q3333333333 rent", "TRANSFER CREDIT", g)
+    debit = _tx(session, ac, d, -100.0, "ONLINE Q3333333333 rent", "TRANSFER DEBIT", g)
+    rent.category, rent.subcategory = "Income", "Rental Income"
+    session.commit()
+
+    rebuild_transfer_groups(session)
+
+    assert rent.transfer_group_id is None and rent.type == "Income"
+    assert (rent.category, rent.subcategory) == ("Income", "Rental Income")
+    assert debit.transfer_group_id is None
+
+
+def test_the_report_counts_only_the_rows_it_freed(session, world):
+    # A lone card payment elsewhere in the database is typed Transfer by the same run, but it was never
+    # freed, so it must not be subtracted from the freed rows.
+    cc = _acct(session, "CC")
+    session.add(Transaction(account_id=cc.id, date=date(2026, 3, 9), amount=99.0, raw_description="DIRECT DEBIT PAYMENT",
+                            raw_transaction_type="CREDIT CARD PAYMENT", type="Income"))
+    session.commit()
+
+    result = rebuild_transfer_groups(session)
+
+    assert result["freed_rows"] == 7
+    assert result["now_ordinary_rows"] == 3          # the stray card purchase and the two near-equal rows
+    assert result["relinked_rows"] == 4

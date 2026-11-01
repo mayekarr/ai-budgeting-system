@@ -26,6 +26,9 @@ def test_a_debit_sent_to_the_users_macquarie_account_is_a_transfer_by_its_text(d
     ("MACQUARIE UNIVERSITY FEES", -500.0),
     ("WOOLWORTHS", -12.0),
     ("PAYMENT TO MCAFEE", -20.0),
+    ("BPAY to Macquarie University 1234567", -500.0),           # a payee, not the user's own account
+    ("Payment to Macquarie Group Limited", -250.0),
+    ("JC to Macquarie University fees", -900.0),
 ])
 def test_other_rows_are_not(description, amount):
     assert is_own_account_transfer(description, amount) is False

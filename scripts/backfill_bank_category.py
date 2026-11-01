@@ -14,7 +14,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from backend.database import add_missing_columns, create_tables, engine, session_scope
+from backend.database import create_tables, session_scope
 from ingestion.bank_category_backfill import backfill_bank_category
 from ingestion.nab_format import parse_nab_format
 
@@ -33,8 +33,7 @@ def main(argv: list[str]) -> int:
     if not files:
         print("No statement files found.")
         return 1
-    create_tables()
-    add_missing_columns(engine)
+    create_tables()  # also adds any column an older database lacks
     with session_scope() as session:
         changed = backfill_bank_category(session, files)
     print(f"bank category filled in for {changed} rows")

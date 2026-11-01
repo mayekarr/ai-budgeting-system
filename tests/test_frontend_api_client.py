@@ -135,12 +135,14 @@ def test_every_write_invalidates_cached_reads(http, write):
         api_client.get_assets()
         api_client.get_asset_transactions(1)
         api_client.get_summary_by_year("Income", "Tax Refund")
+        # "Not a transfer" is a write; the Transfers page must not show the pair it just unlinked.
+        api_client.get_transfers()
 
     read_everything()
     write()
     read_everything()
 
-    assert fake.get.call_count == 12
+    assert fake.get.call_count == 14
 
 
 def test_a_failed_write_still_invalidates_cached_reads(http):

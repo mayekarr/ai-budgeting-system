@@ -102,6 +102,10 @@ def list_transfers(
     for group_id, legs in legs_by_group.items():
         if group_id not in groups:
             continue
+        if len(legs) < 2:
+            # The group's other leg is gone (superseded, say): what is left is not a pair.
+            lone.extend(leg for leg in legs if in_range(leg) and on_account(leg))
+            continue
         if not any(in_range(leg) for leg in legs) or not any(on_account(leg) for leg in legs):
             continue
         legs.sort(key=lambda leg: leg["amount"])  # money out first, money in last
