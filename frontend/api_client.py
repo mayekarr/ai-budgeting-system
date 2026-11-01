@@ -89,6 +89,21 @@ def get_summary_by_year(category: str, subcategory: Optional[str] = None) -> lis
     return _get("/summary/by-year", params)
 
 
+@st.cache_data(ttl=_READ_CACHE_TTL_SECONDS, show_spinner=False)
+def get_transfers(
+    date_from: Optional[date] = None, date_to: Optional[date] = None, account_id: Optional[int] = None
+) -> dict:
+    params = _date_params(date_from, date_to)
+    if account_id is not None:
+        params["account_id"] = account_id
+    return _get("/transfers", params)
+
+
+@st.cache_data(ttl=_READ_CACHE_TTL_SECONDS, show_spinner=False)
+def get_accounts() -> list[dict]:
+    return _get("/accounts")
+
+
 def _date_params(date_from: Optional[date], date_to: Optional[date]) -> dict:
     params = {}
     if date_from is not None:

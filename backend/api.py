@@ -22,6 +22,7 @@ from categorisation.seed_rules import seed_rules_if_empty
 from categorisation.taxonomy import is_valid_category
 from ingestion.account_resolution import resolve_account
 from ingestion.nab_format import NabFormatError, parse_nab_format_with_report
+from transfers.listing import list_transfers
 from transfers.detection import (
     find_suggested_transfer_match,
     is_never_transfer,
@@ -217,6 +218,29 @@ class AccountOut(BaseModel):
     owner: str | None
     account_type: str | None
     asset_id: int | None
+
+
+class TransferLegOut(BaseModel):
+    id: int
+    account_id: int
+    account_name: str
+    date: date_type
+    amount: float
+    raw_description: str
+
+
+class TransferPairOut(BaseModel):
+    group_id: int
+    detection_tier: int
+    confidence: float
+    date: date_type
+    amount: float
+    legs: List[TransferLegOut]
+
+
+class TransfersOut(BaseModel):
+    pairs: List[TransferPairOut]
+    lone: List[TransferLegOut]
 
 
 def get_session() -> Generator[Session, None, None]:
@@ -663,6 +687,26 @@ def _reject_transfer_match(db: Session, tx: Transaction) -> None:
     else:
         # Dismissing a Low suggestion — nothing about this row's own type/category changes.
         _clear_transfer_review_flag(tx, type_changed=False)
+
+
+@app.get("/transfers", response_model=TransfersOut)
+def get_transfers(
+    db: Session = Depends(get_session),
+    date_from: Optional[date_type] = Query(default=None),
+    date_to: Optional[date_type] = Query(default=None),
+    account_id: Optional[int] = Query(default=None),
+) -> dict:
+    """
+    The Transfers page: pairs of linked legs (with detection tier and confidence) and lone transfers
+    whose other side isn't imported. A pair is kept when any leg matches the filters and still lists
+    every leg. See transfers/listing.py.
+    """
+    return list_transfers(db, date_from, date_to, account_id)
+
+
+@app.get("/accounts", response_model=List[AccountOut])
+def list_accounts(db: Session = Depends(get_session)) -> List[Account]:
+    return db.query(Account).order_by(Account.name).all()
 
 
 @app.get("/summary", response_model=SummaryOut)
