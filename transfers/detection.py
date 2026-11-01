@@ -320,6 +320,31 @@ def _tier2_score(tx: Transaction, pair: tuple[Transaction, str]) -> tuple[int, i
     return (_BAND_RANK[band], -abs((candidate.date - tx.date).days))
 
 
+def _tie_is_interchangeable(session: Session, tx: Transaction, candidates: list[Transaction]) -> bool:
+    """
+    A tie costs nothing when the candidates are indistinguishable from each other (one account, one
+    date) and as many identical rows are waiting on this side as there are candidates: then a perfect
+    pairing exists and any assignment is as right as any other. One debit against two identical
+    credits is NOT such a tie (one credit is not this transfer), nor is a tie across accounts.
+    """
+    if len({c.account_id for c in candidates}) != 1 or len({c.date for c in candidates}) != 1:
+        return False
+    equivalents = (
+        session.query(Transaction)
+        .filter(
+            Transaction.account_id == tx.account_id,
+            Transaction.date == tx.date,
+            Transaction.amount == tx.amount,
+            Transaction.superseded_by_id.is_(None),
+            Transaction.transfer_group_id.is_(None),
+            Transaction.type != "Transfer",
+        )
+        .all()
+    )
+    equivalents = [e for e in equivalents if can_be_transfer_leg(e) and bank_category_allows_transfer(e)]
+    return len(equivalents) == len(candidates)
+
+
 def _best_tier2_candidate(
     session: Session, tx: Transaction
 ) -> Optional[tuple[Transaction, str, list[Transaction]]]:
@@ -335,6 +360,11 @@ def _best_tier2_candidate(
     tied = [pair for pair, score in scored if score == best_score]
     candidate, band = tied[0]
     other_tied = [c for c, _ in tied[1:]]
+
+    # Two identical $5,000 payments to a card on the same day against two identical $5,000 credits:
+    # every pairing is equally right, so there is nothing to flag and nothing to downgrade.
+    if len(tied) > 1 and _tie_is_interchangeable(session, tx, [c for c, _ in tied]):
+        return candidate, band, []
 
     # A genuine tie (e.g. two same-amount, same-day candidates on different accounts) must not be
     # silently auto-linked to whichever the DB happens to return first — High confidence claims

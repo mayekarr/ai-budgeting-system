@@ -822,3 +822,63 @@ def test_a_reference_match_is_not_blocked_by_the_banks_category(session):
     session.refresh(out)
     session.refresh(inn)
     assert out.transfer_group_id is not None and out.transfer_group_id == inn.transfer_group_id
+
+
+# --- 2026-11-01: a tie is harmless when the same number of identical rows sit on each side --------------
+
+def test_two_identical_payments_to_two_identical_credits_pair_up_with_no_flag(session):
+    # Two $5,000 payments to the card on the same day: either debit can pair with either credit, and
+    # every pairing is equally right, so nothing needs checking.
+    jc = _account(session, "JC")
+    cc = _account(session, "CC")
+    d1 = _tx(session, jc, date(2025, 11, 3), -5000.00, "ONLINE F9940777286 Linked Acc Trns", "TRANSFER DEBIT")
+    d2 = _tx(session, jc, date(2025, 11, 3), -5000.00, "ONLINE C7371033877 Linked Acc Trns", "TRANSFER DEBIT")
+    c1 = _tx(session, cc, date(2025, 11, 3), 5000.00, "INTERNET PAYMENT Linked Acc Trns", "CREDIT CARD PAYMENT")
+    c2 = _tx(session, cc, date(2025, 11, 3), 5000.00, "INTERNET PAYMENT Linked Acc Trns", "CREDIT CARD PAYMENT")
+
+    for tx in (d1, d2, c1, c2):
+        process_transfer_detection(session, tx)
+
+    rows = [d1, d2, c1, c2]
+    for tx in rows:
+        session.refresh(tx)
+    assert all(tx.type == "Transfer" for tx in rows)
+    assert d1.transfer_group_id != d2.transfer_group_id                  # two separate pairs
+    assert {c1.transfer_group_id, c2.transfer_group_id} == {d1.transfer_group_id, d2.transfer_group_id}
+    assert all(tx.needs_review is False for tx in rows)
+    groups = session.query(TransferGroup).all()
+    assert len(groups) == 2 and all(g.confidence == 1.0 for g in groups)
+
+
+def test_a_tie_with_more_credits_than_debits_is_still_flagged(session):
+    # One debit, two identical credits: one of the credits is not this transfer, and which is unknowable.
+    jc = _account(session, "JC")
+    cc = _account(session, "CC")
+    d = _tx(session, jc, date(2025, 11, 3), -5000.00, "ONLINE F9940777286 Linked Acc Trns", "TRANSFER DEBIT")
+    c1 = _tx(session, cc, date(2025, 11, 3), 5000.00, "INTERNET PAYMENT Linked Acc Trns", "CREDIT CARD PAYMENT")
+    c2 = _tx(session, cc, date(2025, 11, 3), 5000.00, "INTERNET PAYMENT Linked Acc Trns", "CREDIT CARD PAYMENT")
+
+    process_transfer_detection(session, d)
+
+    for tx in (d, c1, c2):
+        session.refresh(tx)
+    assert d.type == "Transfer" and d.needs_review is True and d.needs_review_reason == TRANSFER_MATCH
+    loser = c2 if c1.transfer_group_id is not None else c1
+    assert loser.transfer_group_id is None and loser.needs_review is True
+
+
+def test_a_tie_between_candidates_on_different_accounts_is_still_flagged(session):
+    # The existing test covers the unflagged-winner case; here two debits and two credits are on
+    # different accounts, so the pairings are not interchangeable.
+    a = _account(session, "A")
+    b = _account(session, "B")
+    c = _account(session, "C")
+    d1 = _tx(session, a, date(2026, 8, 5), -500.00, "Out 1", "TRANSFER DEBIT")
+    d2 = _tx(session, a, date(2026, 8, 5), -500.00, "Out 2", "TRANSFER DEBIT")
+    c1 = _tx(session, b, date(2026, 8, 5), 500.00, "In 1", "TRANSFER CREDIT")
+    c2 = _tx(session, c, date(2026, 8, 5), 500.00, "In 2", "TRANSFER CREDIT")
+
+    process_transfer_detection(session, d1)
+
+    session.refresh(d1)
+    assert d1.type == "Transfer" and d1.needs_review is True
