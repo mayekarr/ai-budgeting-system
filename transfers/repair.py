@@ -17,9 +17,10 @@ from sqlalchemy.orm import Session
 
 from backend.models import Transaction, TransferGroup
 from backend.needs_review_reasons import TRANSFER_MATCH
-from categorisation.rules import first_matching_rule, load_active_rules
+from categorisation.recategorise import place_unplaced_row
+from categorisation.rules import load_active_rules
 from transfers.card_payments import reclassify_card_payments
-from transfers.detection import is_never_transfer, process_transfer_detection
+from transfers.detection import is_never_transfer, process_freed_rows, process_transfer_detection
 from transfers.own_accounts import reclassify_own_account_transfers
 
 Restore = dict[int, tuple[Optional[str], Optional[str]]]
@@ -47,16 +48,10 @@ def rebuild_transfer_groups(session: Session, restore_categories: Optional[Resto
 
     rules = load_active_rules(session)
     for tx in freed:
-        if tx.category is not None:
-            continue
-        if restore_categories and tx.id in restore_categories and restore_categories[tx.id][0] is not None:
+        if tx.category is None and restore_categories and tx.id in restore_categories \
+                and restore_categories[tx.id][0] is not None:
             tx.category, tx.subcategory = restore_categories[tx.id]
-            continue
-        match = first_matching_rule(rules, tx.raw_description)
-        if match is not None:
-            tx.category, tx.subcategory = match.category, match.subcategory
-        else:
-            tx.category, tx.subcategory, tx.confidence_score = "Miscellaneous", None, 0.0
+        place_unplaced_row(rules, tx)      # else a rule's category, else unplaced and queued for review
 
     # Text-decided transfers first, so a debit to Macquarie is never paired with something by coincidence.
     own_account = reclassify_own_account_transfers(session)
@@ -66,6 +61,7 @@ def rebuild_transfer_groups(session: Session, restore_categories: Optional[Resto
         process_transfer_detection(session, tx, tiers=(1,))
     for tx in ordered:
         process_transfer_detection(session, tx, tiers=(2,))
+    process_freed_rows(session)        # rows a Tier-1 match took from a group during the passes above
     card_payments = reclassify_card_payments(session)
     session.flush()
 
@@ -102,3 +98,16 @@ def relink_by_reference(session: Session) -> int:
         process_transfer_detection(session, tx, tiers=(1,))
     session.flush()
     return sum(1 for tx in rows if tx.transfer_group_id is not None)
+
+
+def missing_bank_category_share(session: Session) -> float:
+    """
+    The share of imported rows with no saved bank category. The bank-category check is a no-op for a row
+    without one, so a rebuild before `scripts/backfill_bank_category.py` would quietly bring back the wrong
+    pairings it exists to remove.
+    """
+    imported = session.query(Transaction).filter(Transaction.source == "bank_import")
+    total = imported.count()
+    if total == 0:
+        return 0.0
+    return imported.filter(Transaction.raw_bank_category.is_(None)).count() / total

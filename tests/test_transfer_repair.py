@@ -86,7 +86,8 @@ def test_near_equal_pairs_are_dissolved_and_the_rows_go_back_to_income_and_expen
     a, b = world["near"]
     assert a.transfer_group_id is None and b.transfer_group_id is None
     assert (a.type, b.type) == ("Expense", "Income")
-    assert a.needs_review is False
+    # Nothing places them, so they go back to the review queue like any unplaced row.
+    assert a.needs_review is True and a.needs_review_reason == "llm_unavailable"
 
 
 def test_a_genuine_exact_pair_is_matched_again(session, world):
@@ -190,3 +191,25 @@ def test_the_report_counts_only_the_rows_it_freed(session, world):
     assert result["freed_rows"] == 7
     assert result["now_ordinary_rows"] == 3          # the stray card purchase and the two near-equal rows
     assert result["relinked_rows"] == 4
+
+
+def test_a_freed_row_has_its_refund_flag_reset(session, world):
+    intruder = world["intruder"]
+    intruder.is_refund = True
+    session.commit()
+    rebuild_transfer_groups(session)
+    assert intruder.is_refund is False
+
+
+from transfers.repair import missing_bank_category_share
+
+
+def test_missing_bank_category_share_counts_only_imported_rows(session):
+    jc = _acct(session, "JC")
+    for i in range(4):
+        session.add(Transaction(account_id=jc.id, date=date(2026, 1, 1 + i), amount=-1.0, raw_description=f"r{i}",
+                                source="bank_import", raw_bank_category="Groceries" if i < 3 else None))
+    session.add(Transaction(account_id=jc.id, date=date(2026, 1, 9), amount=-1.0, raw_description="manual",
+                            source="manual"))
+    session.commit()
+    assert missing_bank_category_share(session) == 0.25

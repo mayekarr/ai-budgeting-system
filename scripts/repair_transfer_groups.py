@@ -4,6 +4,9 @@ Rebuild finance.db's transfer groups with the current matching rules (see transf
 Usage (from the repo root, with the venv active):
     python -m scripts.repair_transfer_groups [--backup db-backups/finance-YYYY-MM-DD-pre-tidy.db]
 
+Refuses to run while more than 5% of imported rows lack a bank category (run
+`scripts.backfill_bank_category` first; `--force` overrides).
+
 `--backup` names an older copy of finance.db taken before confident links wiped the category of their
 rows; categories of rows this frees are restored from it where it has one. Back up finance.db first.
 """
@@ -15,7 +18,7 @@ import sys
 from pathlib import Path
 
 from backend.database import create_tables, session_scope
-from transfers.repair import rebuild_transfer_groups
+from transfers.repair import missing_bank_category_share, rebuild_transfer_groups
 
 
 def _load_backup(path: Path) -> dict[int, tuple[str | None, str | None]]:
@@ -40,6 +43,11 @@ def main(argv: list[str]) -> int:
         restore = _load_backup(path)
     create_tables()
     with session_scope() as session:
+        missing = missing_bank_category_share(session)
+        if missing > 0.05 and "--force" not in argv:
+            print(f"{missing:.0%} of imported rows have no saved bank category, so the bank-category check would be "
+                  "skipped. Run `python -m scripts.backfill_bank_category` first (or pass --force).")
+            return 1
         result = rebuild_transfer_groups(session, restore)
     for key, value in result.items():
         print(f"{key.replace('_', ' '):28}{value}")

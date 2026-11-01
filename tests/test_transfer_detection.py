@@ -973,3 +973,39 @@ def test_a_refused_link_leaves_every_existing_group_untouched(session):
     assert weak_out.transfer_group_id == weak_in.transfer_group_id == weak_group
     assert weak_out.type == weak_in.type == "Transfer"
     assert session.get(TransferGroup, weak_group) is not None
+
+
+def test_a_row_freed_by_a_stronger_match_is_paired_with_its_own_partner_when_there_is_one(session):
+    from transfers.detection import process_freed_rows
+
+    intruder, credit, debit = _intruder_scenario(session)           # RC -30 wrongly holds AC +30
+    d = _account(session, "D")
+    its_partner = _tx(session, d, date(2026, 3, 3), 30.00, "REFUND OF COFFEE", "TRANSFER CREDIT")
+    process_transfer_detection(session, intruder)                   # pairs with AC +30 or D +30 on amount
+    # force the interesting case: the intruder holds AC +30
+    if intruder.transfer_group_id and its_partner.transfer_group_id == intruder.transfer_group_id:
+        pytest.skip("the intruder happened to take D first")
+
+    process_transfer_detection(session, debit)                      # the reference takes AC +30 back
+    process_freed_rows(session)                                     # ...and the freed intruder is looked at again
+
+    for tx in (intruder, its_partner, credit, debit):
+        session.refresh(tx)
+    assert credit.transfer_group_id == debit.transfer_group_id is not None
+    assert intruder.transfer_group_id == its_partner.transfer_group_id is not None
+
+
+def test_linking_a_pair_does_not_commit_on_its_own(session):
+    # The caller owns the transaction, so a failure part-way through a batch can be rolled back whole.
+    a = _account(session, "A")
+    b = _account(session, "B")
+    out = _tx(session, a, date(2026, 8, 5), -30.00, "ONLINE Q1111111111 x", "TRANSFER DEBIT")
+    inn = _tx(session, b, date(2026, 8, 5), 30.00, "ONLINE Q1111111111 x", "TRANSFER CREDIT")
+    process_transfer_detection(session, out)
+    assert out.transfer_group_id is not None
+
+    session.rollback()
+
+    session.refresh(out)
+    session.refresh(inn)
+    assert out.transfer_group_id is None and out.type != "Transfer"

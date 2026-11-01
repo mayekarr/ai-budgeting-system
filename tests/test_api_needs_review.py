@@ -68,12 +68,12 @@ def _seed_linked_pair(SessionLocal, account_ids, *, tier, confidence, needs_revi
         session.add(group)
         session.flush()
         tx_a = Transaction(
-            account_id=a_id, date=date(2026, 8, 5), amount=-100.0, raw_description="Out",
+            account_id=a_id, date=date(2026, 8, 5), amount=-100.0, raw_description="Out", category="Shopping",
             type="Transfer", transfer_group_id=group.id, needs_review=needs_review,
             needs_review_reason=TRANSFER_MATCH if needs_review else None,
         )
         tx_b = Transaction(
-            account_id=b_id, date=date(2026, 8, 5), amount=100.0, raw_description="In",
+            account_id=b_id, date=date(2026, 8, 5), amount=100.0, raw_description="In", category="Shopping",
             type="Transfer", transfer_group_id=group.id, needs_review=needs_review,
             needs_review_reason=TRANSFER_MATCH if needs_review else None,
         )
@@ -443,3 +443,29 @@ def test_a_refused_link_is_reported_not_silently_treated_as_confirmed(client, mo
         for tx_id in (tx_a_id, tx_b_id):
             tx = session.get(Transaction, tx_id)
             assert tx.type != "Transfer" and tx.needs_review is True      # nothing was cleared
+
+
+def test_not_a_transfer_gives_back_a_category_the_link_had_wiped(client):
+    from backend.models import CategorisationRule
+    api_client, SessionLocal, (a, b) = client
+    with SessionLocal() as session:
+        session.add(CategorisationRule(pattern="COLES", match_type="substring", category="Groceries",
+                                       priority=100, source="seeded", is_active=True))
+        group = TransferGroup(detection_tier=1, confidence=1.0)
+        session.add(group)
+        session.flush()
+        known = Transaction(account_id=a, date=date(2026, 8, 5), amount=-40.0, raw_description="COLES 1234",
+                            type="Transfer", transfer_group_id=group.id, category=None)
+        unknown = Transaction(account_id=b, date=date(2026, 8, 5), amount=40.0, raw_description="SOMETHING ODD",
+                              type="Transfer", transfer_group_id=group.id, category=None)
+        session.add_all([known, unknown])
+        session.commit()
+        known_id, unknown_id = known.id, unknown.id
+
+    assert api_client.patch(f"/transactions/{known_id}", json={"reject_transfer_match": True}).status_code == 200
+
+    with SessionLocal() as session:
+        known, unknown = session.get(Transaction, known_id), session.get(Transaction, unknown_id)
+        assert (known.type, known.category) == ("Expense", "Groceries")      # a rule places it again
+        assert (unknown.type, unknown.category) == ("Income", "Miscellaneous")  # nothing matches: unplaced...
+        assert unknown.needs_review is True and unknown.needs_review_reason == "llm_unavailable"   # ...but queued

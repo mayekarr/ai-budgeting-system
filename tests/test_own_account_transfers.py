@@ -16,6 +16,7 @@ from transfers.own_accounts import is_own_account_transfer, reclassify_own_accou
     ("ANILA ROHANMAYEKAR X6375879193 AC to MCA", -100000.0),
     ("ANILA ROHAN MAYEKAR V9037638368 Macquarie CM Acc", -5000.0),
     ("ROHAN MAYEKAR ANILA B3910879342 transfer to mac acc", -5100.0),
+    ("ANILA ROHANMAYEKAR M123 JC to Macquarie Bank", -2000.0),
 ])
 def test_a_debit_sent_to_the_users_macquarie_account_is_a_transfer_by_its_text(description, amount):
     assert is_own_account_transfer(description, amount) is True

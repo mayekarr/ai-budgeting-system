@@ -47,3 +47,22 @@ def recategorise_unreviewed(session: Session) -> int:
         changed += 1
     session.flush()
     return changed
+
+
+def place_unplaced_row(rules, tx: Transaction) -> None:
+    """
+    Give a row that has lost its category one again: a rule's if one matches, otherwise the unplaced
+    `Miscellaneous` default, queued for review like any row nothing could categorise. Used when a row
+    stops being a Transfer (a rejected pair, a freed group), because a transfer link may have wiped its
+    category. A row that still has a category, and any refund flag it carried, is left alone.
+    """
+    if tx.category is not None:
+        return
+    tx.is_refund = False
+    match = first_matching_rule(rules, tx.raw_description)
+    if match is not None:
+        tx.category, tx.subcategory = match.category, match.subcategory
+        return
+    tx.category, tx.subcategory, tx.confidence_score = "Miscellaneous", None, 0.0
+    if tx.needs_review_reason is None:
+        tx.needs_review, tx.needs_review_reason = True, LLM_UNAVAILABLE

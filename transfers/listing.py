@@ -25,14 +25,18 @@ from backend.models import Account, Transaction, TransferGroup
 # Words that say nothing about whether two rows are the same transfer.
 _GENERIC_WORDS = frozenset({
     "TO", "OF", "THE", "AND", "FOR", "FROM", "IN", "MR", "MRS", "MS", "MISS", "INTERNET", "TRANSFER",
-    "ONLINE", "PAYMENT", "PAY", "ROHAN", "ANILA", "MAYEKAR",
+    "ONLINE", "PAYMENT", "PAY",
 })
+# The account holders' own names appear on both sides of every transfer between their accounts, so they
+# say nothing about whether two rows belong together. This is a personal project for one household:
+# edit this list for a different one.
+_HOUSEHOLD_NAMES = frozenset({"ROHAN", "ANILA", "MAYEKAR"})
 # Only the card's own leg marks a card payment: AUTOMATIC DRAWING is also a monthly donation or instalment.
 _CARD_SIDE_TYPE = "CREDIT CARD PAYMENT"
 
 
 def _words(description: str) -> set[str]:
-    return {w for w in re.findall(r"[A-Za-z0-9]{2,}", description.upper()) if w not in _GENERIC_WORDS}
+    return {w for w in re.findall(r"[A-Za-z0-9]{2,}", description.upper()) if w not in _GENERIC_WORDS and w not in _HOUSEHOLD_NAMES}
 
 
 def _needs_check(group: TransferGroup, members: list[Transaction]) -> bool:

@@ -22,7 +22,7 @@ from transfers.lone_transfers import reclassify_where
 # "transfer to mac acc", "Macquarie CM Acc". A payee that merely contains the name ("BPAY to Macquarie
 # University", "Payment to Macquarie Group") has no account nickname in front and is not matched.
 _MACQUARIE_RE = re.compile(
-    r"\b(?:JC|AC|RC|transfer)\s+to\s+(?:Macquarie(?!\s+(?:University|Group|Bank|Capital)\b)|Mac\s*CMA|Mac\s*Acc|MCA)\b"
+    r"\b(?:JC|AC|RC|transfer)\s+to\s+(?:Macquarie(?!\s+(?:University|Group)\b)|Mac\s*CMA|Mac\s*Acc|MCA)\b"
     r"|\bMacquarie\s+CM\s+Acc\b",
     re.IGNORECASE,
 )

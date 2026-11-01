@@ -18,6 +18,8 @@ from categorisation.bank_category import categorise_from_bank_category
 from categorisation.claude_fallback import categorise_with_fallback
 from categorisation.rules import match_rule
 from categorisation.capital_events import apply_scope, classify_capital_event
+from categorisation.recategorise import place_unplaced_row
+from categorisation.rules import load_active_rules
 from categorisation.seed_rules import seed_rules_if_empty
 from categorisation.taxonomy import is_valid_category
 from ingestion.account_resolution import resolve_account
@@ -27,6 +29,7 @@ from transfers.detection import (
     find_suggested_transfer_match,
     is_never_transfer,
     link_transfer_pair,
+    process_freed_rows,
     process_transfer_detection,
 )
 from transfers.card_payments import is_card_payment
@@ -401,6 +404,8 @@ async def upload_transactions(
         process_transfer_detection(db, tx, tiers=(1,))
     for tx in detectable:
         process_transfer_detection(db, tx, tiers=(2,))
+    # A row a reference match took out of a weaker group (possibly from an earlier upload) is examined again.
+    process_freed_rows(db)
 
     card_payments_marked = False
     for tx in saved_rows:
@@ -409,8 +414,7 @@ async def upload_transactions(
         if tx.type != "Transfer" and is_card_payment(tx.raw_description, tx.amount):
             mark_as_lone_transfer(tx)
             card_payments_marked = True
-    if card_payments_marked:
-        db.commit()
+    db.commit()   # detection leaves the commit to us, so the whole upload lands (or rolls back) as one
 
     # Reflects only this upload's rows, not every needs-review row ever persisted — a global
     # count would misreport every upload after the first.
@@ -705,10 +709,13 @@ def _reject_transfer_match(db: Session, tx: Transaction) -> None:
     """
     if tx.transfer_group_id is not None:
         group = tx.transfer_group
+        rules = load_active_rules(db)
         for member in list(group.members):
             member.transfer_group_id = None
             member.type = "Income" if member.amount > 0 else "Expense"
             _clear_transfer_review_flag(member, type_changed=True)  # Transfer -> Income/Expense
+            # A Tier-1 link wipes the category, so give the row one back (a rule's, else queued for review).
+            place_unplaced_row(rules, member)
         db.delete(group)
     else:
         # Dismissing a Low suggestion — nothing about this row's own type/category changes.

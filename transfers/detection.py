@@ -168,6 +168,7 @@ def _dissolve_group(session: Session, group: TransferGroup, keep: tuple[Transact
     Take a weaker (Tier-2) group apart because a stronger match claimed one of its rows. Every other
     member goes back to an ordinary Income/Expense row (it was only ever paired on amount and date).
     """
+    freed = session.info.setdefault("freed_rows", [])
     for member in list(group.members):
         member.transfer_group = None
         if member not in keep:
@@ -175,9 +176,26 @@ def _dissolve_group(session: Session, group: TransferGroup, keep: tuple[Transact
             if member.needs_review_reason == TRANSFER_MATCH:
                 member.needs_review = False
                 member.needs_review_reason = None
+            freed.append(member)
     session.flush()
     session.delete(group)
     session.flush()
+
+
+def process_freed_rows(session: Session) -> int:
+    """
+    Look again at rows a stronger match just took out of a weaker group. They may have a partner of their
+    own (a shop purchase wrongly held by a transfer is simply left alone; a real transfer that lost its
+    partner to a mistake finds it again). Returns how many rows were examined. The caller commits.
+    """
+    rows = session.info.pop("freed_rows", [])
+    for tx in rows:
+        if tx.type != "Transfer" and not is_never_transfer(tx):
+            process_transfer_detection(session, tx, tiers=(1,))
+    for tx in rows:
+        if tx.type != "Transfer" and not is_never_transfer(tx):
+            process_transfer_detection(session, tx, tiers=(2,))
+    return len(rows)
 
 
 def link_transfer_pair(
@@ -227,7 +245,9 @@ def link_transfer_pair(
             member.needs_review = False
             member.needs_review_reason = None
 
-    session.commit()
+    # Flushed, not committed: the caller owns the transaction, so a failure part-way through a batch
+    # rolls the whole batch back instead of leaving it half done.
+    session.flush()
     return True
 
 
@@ -408,7 +428,7 @@ def _process_tier2(session: Session, tx: Transaction) -> None:
     if link_transfer_pair(session, tx, candidate, tier=2, confidence=_TIER2_MEDIUM_CONFIDENCE):
         _flag_transfer_match(tx, candidate, type_changed=True)
         _flag_unresolved_tie_losers(other_tied)
-        session.commit()
+        session.flush()
 
 
 def _flag_transfer_match(tx: Transaction, candidate: Transaction, *, type_changed: bool) -> None:
