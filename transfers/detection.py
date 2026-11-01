@@ -341,7 +341,12 @@ def _tie_is_interchangeable(session: Session, tx: Transaction, candidates: list[
         )
         .all()
     )
-    equivalents = [e for e in equivalents if can_be_transfer_leg(e) and bank_category_allows_transfer(e)]
+    # Count only rows that could really be this transfer's other leg: the same gates the candidates passed,
+    # and not an ATO refund, rent or capital event, which detection never touches.
+    equivalents = [
+        e for e in equivalents
+        if can_be_transfer_leg(e) and bank_category_allows_transfer(e) and not is_never_transfer(e)
+    ]
     return len(equivalents) == len(candidates)
 
 

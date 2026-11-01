@@ -882,3 +882,53 @@ def test_a_tie_between_candidates_on_different_accounts_is_still_flagged(session
 
     session.refresh(d1)
     assert d1.type == "Transfer" and d1.needs_review is True
+
+
+def _debits_and_credits(session, n_debits, n_credits, *, first_debit_category=None):
+    jc = _account(session, "JC")
+    cc = _account(session, "CC")
+    debits = [_tx(session, jc, date(2025, 11, 3), -5000.00, f"ONLINE REF{i} Linked Acc Trns", "TRANSFER DEBIT")
+              for i in range(n_debits)]
+    credits = [_tx(session, cc, date(2025, 11, 3), 5000.00, "INTERNET PAYMENT Linked Acc Trns", "CREDIT CARD PAYMENT")
+               for _ in range(n_credits)]
+    if first_debit_category:
+        debits[0].category = first_debit_category[0]
+        debits[0].subcategory = first_debit_category[1]
+    session.commit()
+    return debits, credits
+
+
+@pytest.mark.parametrize("order", ["forwards", "backwards", "credits_first"])
+def test_three_identical_payments_against_three_identical_credits_pair_up_unflagged_in_any_order(session, order):
+    debits, credits = _debits_and_credits(session, 3, 3)
+    rows = {"forwards": debits + credits, "backwards": (debits + credits)[::-1],
+            "credits_first": credits + debits}[order]
+
+    for tx in rows:
+        process_transfer_detection(session, tx)
+
+    for tx in debits + credits:
+        session.refresh(tx)
+    assert all(tx.type == "Transfer" and tx.needs_review is False for tx in debits + credits)
+    assert len({tx.transfer_group_id for tx in debits}) == 3
+
+
+def test_three_payments_against_two_credits_still_flags_the_tie(session):
+    # One of the three payments has no credit: the tie is real, so the first pairing is only tentative.
+    debits, credits = _debits_and_credits(session, 3, 2)
+
+    process_transfer_detection(session, debits[0])
+
+    session.refresh(debits[0])
+    assert debits[0].type == "Transfer" and debits[0].needs_review is True
+
+
+def test_a_row_that_could_never_be_a_transfer_partner_is_not_counted_as_interchangeable(session):
+    # Two credits, two debits, but one of the debits is a capital event (an Investment outflow) that
+    # transfer detection never touches: only one debit is really waiting, so the tie is real.
+    debits, credits = _debits_and_credits(session, 2, 2, first_debit_category=("Investment", "Property Purchase"))
+
+    process_transfer_detection(session, debits[1])
+
+    session.refresh(debits[1])
+    assert debits[1].type == "Transfer" and debits[1].needs_review is True
