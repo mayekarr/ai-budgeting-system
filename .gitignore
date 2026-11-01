@@ -16,3 +16,6 @@ config/assets.local.json
 
 # Local database snapshots (real personal data) — never commit.
 db-backups/
+
+# Real one-off transaction tags (FR-9j/FR-9k) -- local-only; see config/corrections.example.json.
+config/corrections.local.json

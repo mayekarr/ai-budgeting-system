@@ -1,7 +1,7 @@
 # Next Steps
 
 Status: Active
-Last updated: 2026-10-18
+Last updated: 2026-11-01
 Companion to: `docs/product-requirements.md` (Draft v9) — read that first for full requirements
 detail; this doc is a resumable to-do list, not a requirements source of truth.
 
@@ -41,13 +41,13 @@ the real `finance.db` has the fixed CC data (6,567 rows, balances match the bank
 the 7 loan drawdown/paydown rows typed `Transfer`. Backups are in the gitignored `db-backups/`
 (`finance-2026-10-18-pre-cc-rebuild.db`, `finance-2026-10-18-pre-part-a.db`). Do these, in order,
 tests-first under the `tdd-workflow` skill:
-1. **Item 4b Part B — seed the old loans.** Add the 6 unseeded loan references from the table in
+1. ~~**Item 4b Part B — seed the old loans.**~~ — **Done** 2026-11-01: added 7 loan accounts (the table lists 7 references, not 6; `15-751-9740` is the same alias as `157519740` once dashes are ignored) and the two assets to `config/assets.local.json`, then ran the seed against the real `finance.db` (backup: `db-backups/finance-2026-11-01-pre-part-b.db`). 293 existing rows re-tagged; a re-run changes 0. Portfolio now has 5 assets: Barkly Street 64 rows, Hillside Crescent 126 (2019-10 → 2025-08), Jericho Ct 61, Mt Alexander Rd 89 (2019-10 → 2024-02), Share Portfolio 66. Original brief: Add the 6 unseeded loan references from the table in
    item 4b (Rohan's answers 2026-10-03 map each to an asset) as `Loan` accounts with their numbers
    as aliases, plus two new assets, **Mt Alexander Rd (Essendon)** and **Hillside Crescent
    (Blackburn)**, via `config/assets.local.json` + `python -m scripts.seed_assets`; `reattribute_assets`
    then re-tags the old instalments/interest. Data only, no new code. The Portfolio page should
    then show 5 assets.
-2. **Item 4b Part C — the one-off tags, from a gitignored local JSON** (decided 2026-10-18).
+2. ~~**Item 4b Part C — the one-off tags, from a gitignored local JSON**~~ — **Done** 2026-11-01 (code-reviewed; 368 tests passing). New `categorisation/one_off_corrections.py` (`apply_corrections`, keyed on exact date + amount + case/space-insensitive description; optional `expect` count for identical rows; skips a row in a transfer group unless the target is `Transfer`; creates **no** categorisation rule, so a one-off can't generalise; keeps an unrelated review reason such as `unrecognised_account`), run by `python -m scripts.apply_corrections [--dry-run]` from gitignored `config/corrections.local.json` (format: `config/corrections.example.json`). **Applied to the real `finance.db`** (backup `db-backups/finance-2026-11-01-pre-part-c.db`): 39 rows, re-run changes 0. Each was confirmed against the DB first. **Decisions to check:** (a) **Decided with Rohan 2026-11-01:** `Property Purchase` lives under a new top-level **Investment** category (Expense is a type, not a category, and Rohan didn't want it under Housing); `Property Sale Proceeds` / `Investment Sale Proceeds` under Income. (b) The 17 Macquarie rows (4 JC→Macquarie 100k + 13 RC `Macquarie CM Acc` / `transfer to mac acc`) stay `Transfer` per FR-9k, groupless until item 5 parses MAC; **Rohan 2026-11-01: once MAC is imported, trace where those funds were used next.** (c) Waverley BMW deposit (CC −$5,000) and refund (RC +$5,000, `is_refund`) both tagged Car/Other so they net (Rohan OK'd). (d) MLC premiums needed nothing (already Expense/Insurance); the `for MLC` pair was already a linked Transfer. **`/code-review` 2026-11-01: 9 findings, 7 fixed tests-first (368 passing):** an entry matching several rows is now applied all-or-nothing (a grouped row used to leave it half applied); malformed entries (missing field, bad date, unknown type) are reported `invalid` instead of aborting the run; amount match is `abs diff < 0.005` not float-equality on `round`; a row already at the target but still carrying a stale review flag is cleaned up; `is_refund` is only written when the entry says so (Transfer always clears it); `TRANSFER_MATCH` constant imported; taxonomy docstring corrected. **Declined:** tagging a row `Transfer` without linking a counterpart is deliberate (same as loan movements; the counterpart isn't in the data); `session_scope` was checked and does commit on clean exit. **Known, flagged to Rohan:** `Investment` is now also offered to the LLM fallback, so it may suggest it for brokerage/ETF rows. **Bug caught on the way:** `--dry-run` wasn't dry because the function committed internally; fixed with `commit=False`, tests-first. Totals after: Income $2,895,793.98, Expense −$2,483,202.44. Original brief (decided 2026-10-18):
    First add the new subcategories to `categorisation/taxonomy.py` (`Property Sale Proceeds`,
    `Property Purchase` under Expense, `Investment Sale Proceeds`; the correction endpoint validates
    against it). Then a script that applies each correction keyed on exact date + amount +

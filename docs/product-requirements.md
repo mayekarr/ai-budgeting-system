@@ -471,7 +471,7 @@ are treated. Everything below applies to refunds generally, tax refunds excepted
   a $582k expense. How to tell a lump sum from an instalment is not designed yet — description
   patterns (`JC to <loan> HL`, vs `LOAN REPAYMENT/INSTALMENT TO A/C`) look sufficient on the real
   data but need checking.
-- FR-9j (**Decided** 2026-10-11, Rohan's call; **not yet built**): the remaining 2022–2025 one-offs,
+- FR-9j (**Decided** 2026-10-11, Rohan's call; **built 2026-11-01**, `categorisation/one_off_corrections.py` + `scripts/apply_corrections.py`; `Property Purchase` is a subcategory of the new `Investment` category, decided 2026-11-01): the remaining 2022–2025 one-offs,
   tagged individually from Rohan's explanations (a rule can't infer these from the text):
   - **India property sale** — the eight 2024-11-06 `…MAINTENANCE` credits (RC + AC, $287,224.69)
     → `Income` / `Property Sale Proceeds` (FR-9g). The bank files them oddly; no loan financed it.
@@ -493,7 +493,7 @@ are treated. Everything below applies to refunds generally, tax refunds excepted
     row exists because that loan isn't seeded.
   Why individually: each is a one-off capital event whose meaning is only in Rohan's head, so each
   becomes a per-transaction correction (rule keyed to the exact description) rather than a pattern.
-- FR-9k (**Decided** 2026-10-11, Rohan's call; **not yet built**): second batch of per-transaction
+- FR-9k (**Decided** 2026-10-11, Rohan's call; tags **built 2026-11-01** via the same script; importer seam fix built 2026-10-18): second batch of per-transaction
   tags and account facts, from a scan of every remaining unclear row:
   - **Trauma-insurance payouts** — RC 2025-02-10 and 2025-02-14 `MLC Limited` +$20,000 each (no
     matching expense) → `Income` / `Other`. They are not refunds, so they must not net against

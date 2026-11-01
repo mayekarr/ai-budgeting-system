@@ -1,0 +1,12 @@
+{
+  "corrections": [
+    {"date": "2022-05-24", "amount": -100000.00, "description": "EXAMPLE SETTLEMENT",
+     "type": "Expense", "category": "Investment", "subcategory": "Property Purchase"},
+    {"date": "2024-11-06", "amount": 50000.00, "description": "EXAMPLE SALE CREDIT",
+     "type": "Income", "category": "Income", "subcategory": "Property Sale Proceeds"},
+    {"date": "2023-03-20", "amount": -10000.00, "description": "EXAMPLE LOAN PAYOFF", "type": "Transfer"},
+    {"date": "2025-12-01", "amount": 5000.00, "description": "EXAMPLE DEPOSIT REFUND",
+     "type": "Expense", "category": "Car", "subcategory": "Other", "is_refund": true},
+    {"date": "2024-06-21", "amount": 1000.00, "description": "TWO IDENTICAL ROWS", "type": "Transfer", "expect": 2}
+  ]
+}
