@@ -116,7 +116,8 @@ if to_check:
         legs_text = "  ↔  ".join(
             f"{leg['account_name']}: {leg['raw_description']} (${leg['amount']:,.2f})" for leg in pair["legs"]
         )
-        text_col.write(f"**{pair['date']}** · {legs_text}")
+        # Streamlit renders text between two dollar signs as maths, so every "$" must be escaped.
+        text_col.write(f"**{pair['date']}** · {legs_text}".replace("$", "\\$"))
         if len(pair["legs"]) > 2:
             text_col.caption(
                 "More than two legs: unlinking releases every leg, including any genuine pair in this group."

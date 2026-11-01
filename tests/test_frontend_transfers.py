@@ -214,3 +214,32 @@ def test_pairs_to_check_are_counted_and_labelled_in_the_table():
     assert [m.label for m in at.metric] == ["Paired transfers", "Pairs to check", "Lone transfers"]
     assert [m.value for m in at.metric] == ["3", "2", "1"]
     assert "Check" in list(at.dataframe[0].value["Confidence"])[0]
+
+
+def test_dollar_amounts_in_the_pair_list_are_escaped_so_they_do_not_render_as_maths():
+    # Streamlit renders text between two unescaped dollar signs as LaTeX, which garbled any line that
+    # showed two amounts.
+    p_transfers, p_accounts = _patched()
+    with p_transfers, p_accounts:
+        at = _open()
+        at.run()
+
+    lines = [m.value for m in at.markdown if "LOOKS LIKE A TRANSFER" in m.value]
+    assert lines
+    for line in lines:
+        assert "$" not in line.replace("\$", "")
+        assert "\$-100.00" in line and "\$99.50" in line
+
+
+def test_a_dollar_sign_inside_a_description_is_escaped_too():
+    def with_a_dollar_in_the_text(*args, **kwargs):
+        data = _fake_transfers()
+        data["pairs"][0]["legs"][0]["raw_description"] = "SHOP $5 OFF"
+        return data
+
+    p_transfers, p_accounts = _patched(with_a_dollar_in_the_text)
+    with p_transfers, p_accounts:
+        at = _open()
+        at.run()
+    line = next(m.value for m in at.markdown if "SHOP" in m.value)
+    assert "$" not in line.replace("\$", "")
