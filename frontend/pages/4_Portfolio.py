@@ -7,15 +7,14 @@ import streamlit as st
 
 from frontend.api_client import get_asset_transactions, get_assets
 from frontend.date_ranges import PRESETS, resolve_date_range
+from frontend.scopes import choose_scope
 
 st.set_page_config(page_title="Portfolio", layout="wide")
 st.title("Portfolio")
 
 # Same switch as Overview: a loan drawdown or paydown is capital & financing, not the asset's
 # day-to-day income or expense, so it is kept apart unless asked for.
-SCOPES = {"Day-to-day": "operating", "Capital & financing": "capital", "Everything": "all"}
-scope_label = st.radio("Show", list(SCOPES), horizontal=True, key="portfolio_scope")
-scope = SCOPES[scope_label]
+scope = choose_scope("portfolio_scope")
 
 preset = st.selectbox("Date range", PRESETS, key="portfolio_date_preset")
 date_from, date_to = resolve_date_range(preset, date.today())

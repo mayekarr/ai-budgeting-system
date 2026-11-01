@@ -71,6 +71,24 @@ def capital_event_clause():
     )
 
 
+SCOPE_VALUES = ("all", "operating", "capital")
+
+
+def apply_scope(query, scope: str):
+    """
+    Restrict a Transaction query to day-to-day (`operating`), capital & financing events
+    (`capital`) or both (`all`). An unknown value raises rather than silently meaning `all`, so a
+    typo can't leak capital events into day-to-day totals.
+    """
+    if scope not in SCOPE_VALUES:
+        raise ValueError(f"Unknown scope {scope!r}; expected one of {SCOPE_VALUES}.")
+    if scope == "operating":
+        return query.filter(~capital_event_clause())
+    if scope == "capital":
+        return query.filter(capital_event_clause())
+    return query
+
+
 def classify_capital_event(raw_description: str, amount: float) -> Optional[CapitalTag]:
     """The tag a row's text alone decides, or None. A debit is a paydown, a credit a drawdown."""
     if is_loan_movement(raw_description, amount):

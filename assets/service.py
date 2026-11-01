@@ -11,7 +11,7 @@ from sqlalchemy.orm import Query, Session
 
 from assets.attribution import reattribute_assets
 from backend.models import Asset, AssetAlias, Transaction
-from categorisation.capital_events import capital_event_clause
+from categorisation.capital_events import apply_scope
 
 
 class AliasInUseError(ValueError):
@@ -59,11 +59,7 @@ def asset_transactions_query(
         q = q.filter(Transaction.date >= date_from)
     if date_to is not None:
         q = q.filter(Transaction.date <= date_to)
-    if scope == "operating":
-        q = q.filter(~capital_event_clause())
-    elif scope == "capital":
-        q = q.filter(capital_event_clause())
-    return q
+    return apply_scope(q, scope)
 
 
 def asset_cash_flows(

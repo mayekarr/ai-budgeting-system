@@ -149,3 +149,22 @@ def test_sql_clause_agrees_with_the_python_predicate(session):
     not_in_clause = {t.raw_description for t in session.query(Transaction).filter(~capital_event_clause())}
     assert in_clause == expected
     assert in_clause | not_in_clause == {f"row {i}" for i in range(len(pairs))}   # no NULL rows dropped
+
+
+def test_apply_scope_filters_a_query_and_rejects_unknown_values(session):
+    from categorisation.capital_events import apply_scope
+
+    account_id = session.query(Account).one().id
+    for desc, cat, sub in [("a", "Groceries", None), ("b", "Investment", "Property Purchase"), ("c", None, None)]:
+        session.add(Transaction(account_id=account_id, date=date(2026, 1, 1), amount=-1.0, raw_description=desc,
+                                type="Expense", category=cat, subcategory=sub))
+    session.commit()
+
+    def names(scope):
+        return {t.raw_description for t in apply_scope(session.query(Transaction), scope)}
+
+    assert names("all") == {"a", "b", "c"}
+    assert names("operating") == {"a", "c"}      # a row with no category is day-to-day, not dropped
+    assert names("capital") == {"b"}
+    with pytest.raises(ValueError, match="scope"):
+        apply_scope(session.query(Transaction), "Operating")

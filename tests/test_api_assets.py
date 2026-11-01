@@ -253,3 +253,14 @@ def test_asset_transactions_scope_filters_the_drill_in(env):
 def test_assets_rejects_an_unknown_scope(env):
     client, _, _ = env
     assert client.get("/assets", params={"scope": "nonsense"}).status_code == 422
+
+
+@pytest.mark.parametrize("bad_scope", ["Operating", "capitals", ""])
+def test_asset_service_rejects_an_unknown_scope_instead_of_treating_it_as_all(env, bad_scope):
+    from assets.service import asset_cash_flows, asset_transactions_query
+    _, Session, ids = env
+    with Session() as session:
+        with pytest.raises(ValueError, match="scope"):
+            asset_cash_flows(session, scope=bad_scope)
+        with pytest.raises(ValueError, match="scope"):
+            asset_transactions_query(session, ids["jericho"], scope=bad_scope)

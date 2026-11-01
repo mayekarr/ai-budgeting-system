@@ -148,3 +148,25 @@ def test_portfolio_defaults_to_day_to_day_and_switches_scope_for_both_calls():
 
     assert not at.exception
     assert (mock_assets.call_args.kwargs["scope"], mock_tx.call_args.kwargs["scope"]) == ("all", "all")
+
+
+def test_portfolio_says_so_when_capital_events_are_hidden_and_not_when_everything_is_shown():
+    p_assets, p_tx = _patched()
+    with p_assets, p_tx:
+        at = _open_portfolio()
+        at.run()
+        default_captions = " ".join(c.value for c in at.caption)
+        at.radio(key="portfolio_scope").set_value("Everything").run()
+        everything_captions = " ".join(c.value for c in at.caption)
+
+    assert "hidden" in default_captions.lower()
+    assert "hidden" not in everything_captions.lower()
+
+
+def test_overview_and_portfolio_offer_the_same_scope_choices():
+    from frontend.scopes import SCOPES
+    p_assets, p_tx = _patched()
+    with p_assets, p_tx:
+        at = _open_portfolio()
+        at.run()
+    assert list(at.radio(key="portfolio_scope").options) == list(SCOPES)

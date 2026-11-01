@@ -17,7 +17,7 @@ from assets.service import AliasInUseError, asset_cash_flows, asset_transactions
 from categorisation.bank_category import categorise_from_bank_category
 from categorisation.claude_fallback import categorise_with_fallback
 from categorisation.rules import match_rule
-from categorisation.capital_events import classify_capital_event, is_capital_event
+from categorisation.capital_events import apply_scope, classify_capital_event
 from categorisation.seed_rules import seed_rules_if_empty
 from categorisation.taxonomy import is_valid_category
 from ingestion.account_resolution import resolve_account
@@ -692,14 +692,12 @@ def get_summary(
         q = q.filter(Transaction.date <= date_to)
     if account_id is not None:
         q = q.filter(Transaction.account_id == account_id)
+    q = apply_scope(q, scope)
 
     total_income = 0.0
     category_raw_totals: dict[str, float] = {}
     income_raw_totals: dict[str, float] = {}
     for tx in q.all():
-        # operating = day-to-day; capital = sale/purchase, contributions, drawdowns, paydowns.
-        if scope != "all" and is_capital_event(tx.category, tx.subcategory) != (scope == "capital"):
-            continue
         if tx.category == "Income":
             total_income += tx.amount
             income_label = tx.subcategory or "Uncategorized"
