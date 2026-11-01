@@ -131,3 +131,21 @@ def test_reclassify_leaves_grouped_and_superseded_rows_alone(session):
     assert reclassify_capital_events(session) == 1  # only the settled, ungrouped row
     assert grouped.type == "Transfer" and pending.category == "Miscellaneous"
     assert settled.subcategory == "Loan Paydown"
+
+
+def test_sql_clause_agrees_with_the_python_predicate(session):
+    from categorisation.capital_events import capital_event_clause
+
+    pairs = [("Income", "Loan Drawdown"), ("Income", "Salary"), ("Investment", "Property Purchase"),
+             ("Loans & Finance", "Loan Paydown"), ("Loans & Finance", "Loan Repayment"), (None, None),
+             ("Groceries", None)]
+    for i, (category, subcategory) in enumerate(pairs):
+        session.add(Transaction(account_id=session.query(Account).one().id, date=date(2026, 1, 1), amount=-1.0,
+                                raw_description=f"row {i}", type="Expense", category=category,
+                                subcategory=subcategory))
+    session.commit()
+    in_clause = {t.raw_description for t in session.query(Transaction).filter(capital_event_clause())}
+    expected = {t.raw_description for t in session.query(Transaction) if is_capital_event(t.category, t.subcategory)}
+    not_in_clause = {t.raw_description for t in session.query(Transaction).filter(~capital_event_clause())}
+    assert in_clause == expected
+    assert in_clause | not_in_clause == {f"row {i}" for i in range(len(pairs))}   # no NULL rows dropped

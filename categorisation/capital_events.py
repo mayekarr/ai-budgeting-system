@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from backend.models import Transaction
@@ -53,6 +54,21 @@ def is_capital_event(category: Optional[str], subcategory: Optional[str]) -> boo
     if category == "Investment":
         return True
     return category == "Loans & Finance" and subcategory == "Loan Paydown"
+
+
+def capital_event_clause():
+    """
+    SQL form of `is_capital_event` over Transaction.category/subcategory. coalesce(...) keeps it
+    two-valued, so `~capital_event_clause()` still returns rows with a NULL category instead of
+    silently dropping them (SQL's three-valued logic).
+    """
+    category = func.coalesce(Transaction.category, "")
+    subcategory = func.coalesce(Transaction.subcategory, "")
+    return or_(
+        and_(category == "Income", subcategory.in_(CAPITAL_INCOME_SUBCATEGORIES)),
+        category == "Investment",
+        and_(category == "Loans & Finance", subcategory == "Loan Paydown"),
+    )
 
 
 def classify_capital_event(raw_description: str, amount: float) -> Optional[CapitalTag]:

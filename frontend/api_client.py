@@ -98,16 +98,20 @@ def _date_params(date_from: Optional[date], date_to: Optional[date]) -> dict:
     return params
 
 
+def _scope_params(scope: str) -> dict:
+    return {} if scope == "all" else {"scope": scope}
+
+
 @st.cache_data(ttl=_READ_CACHE_TTL_SECONDS, show_spinner=False)
-def get_assets(date_from: Optional[date] = None, date_to: Optional[date] = None) -> dict:
-    return _get("/assets", _date_params(date_from, date_to))
+def get_assets(date_from: Optional[date] = None, date_to: Optional[date] = None, scope: str = "all") -> dict:
+    return _get("/assets", {**_date_params(date_from, date_to), **_scope_params(scope)})
 
 
 @st.cache_data(ttl=_READ_CACHE_TTL_SECONDS, show_spinner=False)
 def get_asset_transactions(
-    asset_id: int, date_from: Optional[date] = None, date_to: Optional[date] = None
+    asset_id: int, date_from: Optional[date] = None, date_to: Optional[date] = None, scope: str = "all"
 ) -> list[dict]:
-    return _get(f"/assets/{asset_id}/transactions", _date_params(date_from, date_to))
+    return _get(f"/assets/{asset_id}/transactions", {**_date_params(date_from, date_to), **_scope_params(scope)})
 
 
 def _patch_transaction(transaction_id: int, payload: dict) -> dict:

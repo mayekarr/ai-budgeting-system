@@ -11,6 +11,12 @@ from frontend.date_ranges import PRESETS, resolve_date_range
 st.set_page_config(page_title="Portfolio", layout="wide")
 st.title("Portfolio")
 
+# Same switch as Overview: a loan drawdown or paydown is capital & financing, not the asset's
+# day-to-day income or expense, so it is kept apart unless asked for.
+SCOPES = {"Day-to-day": "operating", "Capital & financing": "capital", "Everything": "all"}
+scope_label = st.radio("Show", list(SCOPES), horizontal=True, key="portfolio_scope")
+scope = SCOPES[scope_label]
+
 preset = st.selectbox("Date range", PRESETS, key="portfolio_date_preset")
 date_from, date_to = resolve_date_range(preset, date.today())
 
@@ -22,7 +28,7 @@ if preset == "Custom":
         date_from, date_to = custom_range
 
 try:
-    portfolio = get_assets(date_from=date_from, date_to=date_to)
+    portfolio = get_assets(date_from=date_from, date_to=date_to, scope=scope)
 except Exception as exc:  # pylint: disable=broad-except
     st.error(f"Could not load assets: {exc}")
     st.stop()
@@ -69,7 +75,7 @@ names_to_show = list(asset_ids) if selected == ALL_ASSETS else [selected]
 transactions = []
 for name in names_to_show:
     try:
-        rows = get_asset_transactions(asset_ids[name], date_from=date_from, date_to=date_to)
+        rows = get_asset_transactions(asset_ids[name], date_from=date_from, date_to=date_to, scope=scope)
     except Exception as exc:  # pylint: disable=broad-except
         st.error(f"Could not load transactions for {name}: {exc}")
         st.stop()

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Query, Session
 
 from assets.attribution import reattribute_assets
 from backend.models import Asset, AssetAlias, Transaction
+from categorisation.capital_events import capital_event_clause
 
 
 class AliasInUseError(ValueError):
@@ -42,7 +43,11 @@ class AssetCashFlow:
 
 
 def asset_transactions_query(
-    session: Session, asset_id: int, date_from: Optional[date] = None, date_to: Optional[date] = None
+    session: Session,
+    asset_id: int,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    scope: str = "all",
 ) -> Query:
     """An asset's transactions, with the same Transfer/superseded exclusions as GET /summary."""
     q = session.query(Transaction).filter(
@@ -54,11 +59,18 @@ def asset_transactions_query(
         q = q.filter(Transaction.date >= date_from)
     if date_to is not None:
         q = q.filter(Transaction.date <= date_to)
+    if scope == "operating":
+        q = q.filter(~capital_event_clause())
+    elif scope == "capital":
+        q = q.filter(capital_event_clause())
     return q
 
 
 def asset_cash_flows(
-    session: Session, date_from: Optional[date] = None, date_to: Optional[date] = None
+    session: Session,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    scope: str = "all",
 ) -> list[AssetCashFlow]:
     """
     Every asset (sold ones included, so their history stays reportable), with income and expense
@@ -68,7 +80,7 @@ def asset_cash_flows(
     flows = []
     for asset in session.query(Asset).order_by(Asset.name):
         income = expense = 0.0
-        for tx in asset_transactions_query(session, asset.id, date_from, date_to):
+        for tx in asset_transactions_query(session, asset.id, date_from, date_to, scope):
             if tx.category == "Income":
                 income += tx.amount
             else:

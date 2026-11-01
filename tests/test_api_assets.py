@@ -205,3 +205,51 @@ def test_patch_account_relinking_moves_existing_tags(env):
     with Session() as s:
         row = s.query(Transaction).filter_by(raw_description="INTEREST CHARGED FROM A/C 99-999-9999").one()
         assert row.asset_id is None
+
+
+def _add_capital_events(Session, ids):
+    with Session() as s:
+        def tx(amount, desc, category, subcategory, tx_type):
+            s.add(Transaction(account_id=ids["jc"], date=date(2026, 8, 6), amount=amount, raw_description=desc,
+                              asset_id=ids["jericho"], category=category, subcategory=subcategory, type=tx_type))
+        tx(900000.0, "LOAN PROCEEDS FROM A/C 34-188-5257", "Income", "Loan Drawdown", "Income")
+        tx(-582076.0, "JC to Barkly HL", "Loans & Finance", "Loan Paydown", "Expense")
+        s.commit()
+
+
+def test_assets_scope_keeps_capital_events_out_of_day_to_day_and_in_their_own_view(env):
+    client, Session, ids = env
+    _add_capital_events(Session, ids)
+
+    everything = _by_name(client.get("/assets").json())["Jericho Ct"]
+    operating = _by_name(client.get("/assets", params={"scope": "operating"}).json())["Jericho Ct"]
+    capital = _by_name(client.get("/assets", params={"scope": "capital"}).json())["Jericho Ct"]
+
+    assert operating["income"] == pytest.approx(2704.86)          # rent only, no $900k drawdown
+    assert operating["expense"] == pytest.approx(4877.79)         # interest only, no $582k paydown
+    assert capital["income"] == pytest.approx(900000.0)
+    assert capital["expense"] == pytest.approx(582076.0)
+    assert everything["income"] == pytest.approx(operating["income"] + capital["income"])
+    assert everything["expense"] == pytest.approx(operating["expense"] + capital["expense"])
+
+
+def test_assets_scope_applies_to_the_total_too(env):
+    client, Session, ids = env
+    _add_capital_events(Session, ids)
+    total = client.get("/assets", params={"scope": "operating"}).json()["total"]
+    assert total["income"] == pytest.approx(2704.86)
+
+
+def test_asset_transactions_scope_filters_the_drill_in(env):
+    client, Session, ids = env
+    _add_capital_events(Session, ids)
+    url = f"/assets/{ids['jericho']}/transactions"
+    operating = {r["raw_description"] for r in client.get(url, params={"scope": "operating"}).json()}
+    capital = {r["raw_description"] for r in client.get(url, params={"scope": "capital"}).json()}
+    assert "LOAN PROCEEDS FROM A/C 34-188-5257" not in operating and "6 Jericho Ct rent" in operating
+    assert capital == {"LOAN PROCEEDS FROM A/C 34-188-5257", "JC to Barkly HL"}
+
+
+def test_assets_rejects_an_unknown_scope(env):
+    client, _, _ = env
+    assert client.get("/assets", params={"scope": "nonsense"}).status_code == 422

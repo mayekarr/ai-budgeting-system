@@ -776,9 +776,13 @@ def list_assets(
     db: Session = Depends(get_session),
     date_from: Optional[date_type] = Query(default=None),
     date_to: Optional[date_type] = Query(default=None),
+    scope: Literal["all", "operating", "capital"] = Query(default="all"),
 ) -> AssetsOut:
-    """Portfolio view (J6): each asset's income, expense and net over a period, plus a total."""
-    flows = asset_cash_flows(db, date_from, date_to)
+    """
+    Portfolio view (J6): each asset's income, expense and net over a period, plus a total. `scope`
+    is GET /summary's: day-to-day (operating), capital & financing events, or both (all).
+    """
+    flows = asset_cash_flows(db, date_from, date_to, scope)
     assets = [
         AssetCashFlowOut(
             id=f.asset.id, name=f.asset.name, type=f.asset.type, is_active=f.asset.is_active,
@@ -797,10 +801,15 @@ def list_asset_transactions(
     db: Session = Depends(get_session),
     date_from: Optional[date_type] = Query(default=None),
     date_to: Optional[date_type] = Query(default=None),
+    scope: Literal["all", "operating", "capital"] = Query(default="all"),
 ) -> List[Transaction]:
     if db.get(Asset, asset_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found.")
-    return asset_transactions_query(db, asset_id, date_from, date_to).order_by(Transaction.date.desc()).all()
+    return (
+        asset_transactions_query(db, asset_id, date_from, date_to, scope)
+        .order_by(Transaction.date.desc())
+        .all()
+    )
 
 
 @app.post("/assets", status_code=status.HTTP_201_CREATED, response_model=AssetOut)

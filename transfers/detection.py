@@ -29,7 +29,7 @@ from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from backend.models import Account, AccountAlias, Transaction, TransferGroup
-from categorisation.capital_events import CAPITAL_INCOME_SUBCATEGORIES, is_capital_event
+from categorisation.capital_events import capital_event_clause, is_capital_event
 from backend.needs_review_reasons import TRANSFER_MATCH, should_supersede
 from transfers.aliases import alias_matches_text
 
@@ -242,15 +242,9 @@ def _find_tier2_candidates(session: Session, tx: Transaction) -> list[tuple[Tran
             ~or_(
                 and_(
                     func.coalesce(Transaction.category, "") == "Income",
-                    func.coalesce(Transaction.subcategory, "").in_(
-                        _NEVER_HEURISTIC_SUBCATEGORIES + CAPITAL_INCOME_SUBCATEGORIES
-                    ),
+                    func.coalesce(Transaction.subcategory, "").in_(_NEVER_HEURISTIC_SUBCATEGORIES),
                 ),
-                func.coalesce(Transaction.category, "") == "Investment",
-                and_(
-                    func.coalesce(Transaction.category, "") == "Loans & Finance",
-                    func.coalesce(Transaction.subcategory, "") == "Loan Paydown",
-                ),
+                capital_event_clause(),
             ),
         )
         .all()

@@ -21,7 +21,7 @@ def _fake_assets(*args, **kwargs):
     }
 
 
-def _fake_asset_transactions(asset_id, date_from=None, date_to=None):
+def _fake_asset_transactions(asset_id, date_from=None, date_to=None, scope="all"):
     rows = {
         1: [{"id": 10, "date": "2026-08-05", "amount": 2704.86, "raw_description": "6 Jericho Ct rent",
              "category": "Income", "subcategory": "Rental Income", "asset_id": 1}],
@@ -68,8 +68,9 @@ def test_portfolio_passes_the_resolved_date_range():
         at.selectbox(key="portfolio_date_preset").select("Custom").run()
         at.date_input(key="portfolio_custom_range").set_value((date(2026, 7, 1), date(2026, 8, 31))).run()
 
-    assert mock_assets.call_args.kwargs == {"date_from": date(2026, 7, 1), "date_to": date(2026, 8, 31)}
-    assert mock_tx.call_args.kwargs == {"date_from": date(2026, 7, 1), "date_to": date(2026, 8, 31)}
+    expected = {"date_from": date(2026, 7, 1), "date_to": date(2026, 8, 31), "scope": "operating"}
+    assert mock_assets.call_args.kwargs == expected
+    assert mock_tx.call_args.kwargs == expected
 
 
 def test_all_assets_is_the_default_and_combines_every_assets_transactions():
@@ -132,3 +133,18 @@ def test_api_failure_shows_error():
         at.run()
 
     assert "backend down" in at.error[0].value
+
+
+def test_portfolio_defaults_to_day_to_day_and_switches_scope_for_both_calls():
+    p_assets, p_tx = _patched()
+    with p_assets as mock_assets, p_tx as mock_tx:
+        at = _open_portfolio()
+        at.run()
+        assert at.radio(key="portfolio_scope").value == "Day-to-day"
+        assert mock_assets.call_args.kwargs["scope"] == "operating"
+        at.radio(key="portfolio_scope").set_value("Capital & financing").run()
+        assert (mock_assets.call_args.kwargs["scope"], mock_tx.call_args.kwargs["scope"]) == ("capital", "capital")
+        at.radio(key="portfolio_scope").set_value("Everything").run()
+
+    assert not at.exception
+    assert (mock_assets.call_args.kwargs["scope"], mock_tx.call_args.kwargs["scope"]) == ("all", "all")
