@@ -208,7 +208,8 @@ def test_confirm_transfer_with_id_links_both_legs_at_full_confidence(client):
         assert other.needs_review is False
         assert other.transfer_group_id == body["transfer_group_id"]
         group = session.get(TransferGroup, other.transfer_group_id)
-        assert group.detection_tier == 2
+        # A pair the user confirmed is final (Tier 1): a rebuild or a stronger match leaves it alone.
+        assert group.detection_tier == 1
         assert group.confidence == 1.0
 
 
@@ -414,3 +415,31 @@ def test_suggested_transfer_match_unknown_transaction_404s(client):
     response = api_client.get("/transactions/999999/suggested-transfer-match")
 
     assert response.status_code == 404
+
+
+def test_confirming_a_tentative_pair_makes_it_final(client):
+    api_client, SessionLocal, account_ids = client
+    tx_a_id, tx_b_id, group_id = _seed_linked_pair(SessionLocal, account_ids, tier=2, confidence=0.6, needs_review=True)
+
+    assert api_client.patch(f"/transactions/{tx_a_id}", json={"confirm_transfer_match": True}).status_code == 200
+
+    with SessionLocal() as session:
+        group = session.get(TransferGroup, group_id)
+        assert (group.detection_tier, group.confidence) == (1, 1.0)
+    pair = next(p for p in api_client.get("/transfers").json()["pairs"] if p["group_id"] == group_id)
+    assert pair["needs_check"] is False
+
+
+def test_a_refused_link_is_reported_not_silently_treated_as_confirmed(client, monkeypatch):
+    api_client, SessionLocal, (a, b) = client
+    tx_a_id = _seed_tx(SessionLocal, a, amount=-100.0, needs_review=True, needs_review_reason=TRANSFER_MATCH)
+    tx_b_id = _seed_tx(SessionLocal, b, amount=100.0, type="Income", needs_review=True, needs_review_reason=TRANSFER_MATCH)
+    monkeypatch.setattr(api_module, "link_transfer_pair", lambda *args, **kwargs: False)
+
+    response = api_client.patch(f"/transactions/{tx_a_id}", json={"confirm_transfer_with_id": tx_b_id})
+
+    assert response.status_code == 409
+    with SessionLocal() as session:
+        for tx_id in (tx_a_id, tx_b_id):
+            tx = session.get(Transaction, tx_id)
+            assert tx.type != "Transfer" and tx.needs_review is True      # nothing was cleared

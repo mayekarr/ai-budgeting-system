@@ -204,12 +204,10 @@ def link_transfer_pair(
     """
     if tx.transfer_group_id is not None and tx.transfer_group_id == counterpart.transfer_group_id:
         return True
-    for member in (tx, counterpart):
-        group = member.transfer_group
-        if group is None:
-            continue
-        if group.detection_tier <= tier:
-            return False
+    existing = [m.transfer_group for m in (tx, counterpart) if m.transfer_group is not None]
+    if any(group.detection_tier <= tier for group in existing):
+        return False                       # refuse before touching anything
+    for group in {g.id: g for g in existing}.values():
         _dissolve_group(session, group, keep=(tx, counterpart))
 
     group = TransferGroup(detection_tier=tier, confidence=confidence)

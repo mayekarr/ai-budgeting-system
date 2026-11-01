@@ -7,7 +7,7 @@ What the Transfers page shows: every live `Transfer` row, split into
   - lone transfers: Transfer rows with no group, i.e. the other side isn't imported (a card payment
     whose account statement ends earlier, for example).
 
-Superseded rows are never shown. A date or account filter keeps a pair when ANY leg matches, and the
+Superseded rows are never shown. A date and account filter keeps a pair when ANY ONE leg satisfies both, and the
 pair still lists all of its legs, so the other side of a move is never hidden by the filter.
 """
 
@@ -106,7 +106,7 @@ def list_transfers(
             # The group's other leg is gone (superseded, say): what is left is not a pair.
             lone.extend(leg for leg in legs if in_range(leg) and on_account(leg))
             continue
-        if not any(in_range(leg) for leg in legs) or not any(on_account(leg) for leg in legs):
+        if not any(in_range(leg) and on_account(leg) for leg in legs):
             continue
         legs.sort(key=lambda leg: leg["amount"])  # money out first, money in last
         pairs.append(

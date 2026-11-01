@@ -948,3 +948,28 @@ def test_a_reference_match_never_takes_a_rent_credit_as_its_partner(session):
     session.refresh(rent)
     session.refresh(debit)
     assert rent.transfer_group_id is None and debit.transfer_group_id is None
+
+
+def test_a_refused_link_leaves_every_existing_group_untouched(session):
+    # tx sits in a weak Tier-2 group, but its partner is in a final Tier-1 group: the link is refused,
+    # and the weak group must NOT be taken apart for nothing.
+    from transfers.detection import link_transfer_pair
+
+    a = _account(session, "A")
+    b = _account(session, "B")
+    c = _account(session, "C")
+    weak_out = _tx(session, a, date(2026, 8, 5), -100.00, "weak out")
+    weak_in = _tx(session, b, date(2026, 8, 5), 100.00, "weak in")
+    strong_out = _tx(session, b, date(2026, 8, 6), -50.00, "strong out")
+    strong_in = _tx(session, c, date(2026, 8, 6), 50.00, "strong in")
+    assert link_transfer_pair(session, weak_out, weak_in, tier=2)
+    assert link_transfer_pair(session, strong_out, strong_in, tier=1)
+    weak_group = weak_out.transfer_group_id
+
+    assert link_transfer_pair(session, weak_out, strong_out, tier=1) is False
+
+    for tx in (weak_out, weak_in, strong_out, strong_in):
+        session.refresh(tx)
+    assert weak_out.transfer_group_id == weak_in.transfer_group_id == weak_group
+    assert weak_out.type == weak_in.type == "Transfer"
+    assert session.get(TransferGroup, weak_group) is not None

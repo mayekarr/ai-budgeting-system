@@ -29,7 +29,11 @@ def _load_backup(path: Path) -> dict[int, tuple[str | None, str | None]]:
 def main(argv: list[str]) -> int:
     restore = None
     if "--backup" in argv:
-        path = Path(argv[argv.index("--backup") + 1])
+        position = argv.index("--backup")
+        if position + 1 >= len(argv):
+            print("--backup needs the path of an older copy of finance.db.")
+            return 1
+        path = Path(argv[position + 1])
         if not path.exists():
             print(f"No backup at {path}.")
             return 1

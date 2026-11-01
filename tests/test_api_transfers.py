@@ -178,3 +178,27 @@ def test_a_group_with_only_one_live_leg_is_listed_as_a_lone_transfer_not_a_one_r
 
     assert group_id not in {p["group_id"] for p in body["pairs"]}
     assert "LIVE LEG" in {l["raw_description"] for l in body["lone"]}
+
+
+def test_a_pair_is_kept_only_when_one_leg_satisfies_both_the_account_and_date_filters(env):
+    client, Session, ids = env
+    with Session() as s:
+        group = TransferGroup(detection_tier=1, confidence=1.0)
+        s.add(group)
+        s.flush()
+        # Leg on JC in January, leg on AC in March.
+        s.add(Transaction(account_id=ids["jc"], date=date(2026, 1, 5), amount=-61.0, raw_description="SPLIT OUT",
+                          type="Transfer", transfer_group_id=group.id))
+        s.add(Transaction(account_id=ids["ac"], date=date(2026, 3, 5), amount=61.0, raw_description="SPLIT IN",
+                          type="Transfer", transfer_group_id=group.id))
+        s.commit()
+        group_id = group.id
+
+    def groups(**params):
+        return {p["group_id"] for p in client.get("/transfers", params=params).json()["pairs"]}
+
+    # JC (January leg) with a March-only range: no single leg is on JC AND in March.
+    assert group_id not in groups(account_id=ids["jc"], date_from="2026-03-01", date_to="2026-03-31")
+    # JC with a range containing the January leg, and AC with March, both match one leg.
+    assert group_id in groups(account_id=ids["jc"], date_from="2026-01-01", date_to="2026-01-31")
+    assert group_id in groups(account_id=ids["ac"], date_from="2026-03-01", date_to="2026-03-31")

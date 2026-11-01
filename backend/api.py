@@ -631,10 +631,17 @@ def _confirm_transfer_match(tx: Transaction) -> None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Transaction has no transfer match to confirm.",
         )
-    for member in tx.transfer_group.members:
+    group = tx.transfer_group
+    for member in group.members:
         # type isn't changing here — it was already set Transfer when this Medium match was
         # auto-linked; a lesser reason would already have been superseded at that point.
         _clear_transfer_review_flag(member, type_changed=False)
+        member.category = None            # a confirmed Transfer's old category means nothing
+        member.subcategory = None
+    # The user has decided: the pair is final (Tier 1), so it is no longer an amount-only guess that a
+    # stronger match could take apart, that the Transfers page flags, or that a rebuild would redo.
+    group.detection_tier = 1
+    group.confidence = 1.0
 
 
 def _confirm_transfer_with_id(db: Session, tx: Transaction, counterpart_id: int) -> None:
@@ -678,7 +685,12 @@ def _confirm_transfer_with_id(db: Session, tx: Transaction, counterpart_id: int)
 
     # Reuses transfers/detection.py's own linking primitive rather than hand-rolling the same
     # group-creation/type-assignment steps a second time here (/code-review finding).
-    link_transfer_pair(db, tx, counterpart, tier=2, confidence=1.0)
+    # A pair the user links by hand is final (Tier 1), not an amount-only guess.
+    if not link_transfer_pair(db, tx, counterpart, tier=1, confidence=1.0):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="One of these transactions already belongs to a transfer; unlink that first.",
+        )
     for member in (tx, counterpart):
         # This IS the change from non-Transfer to Transfer (a Low match is never auto-linked) —
         # a preserved low_confidence_category/refund_ambiguity becomes moot right now.
