@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Credit-card payments are `Transfer`s (docs/product-requirements.md FR-9e): money moving from the
 user's own account to pay off the user's own card.
@@ -14,12 +12,13 @@ It only runs for rows detection did not pair, and the later-arriving counterpart
 through Tier-1 alias matching.
 """
 
+from __future__ import annotations
+
 import re
 
 from sqlalchemy.orm import Session
 
-from backend.models import Transaction
-from backend.needs_review_reasons import TRANSFER_MATCH, should_supersede
+from transfers.lone_transfers import reclassify_where
 
 _CARD_SIDE_RE = re.compile(r"^\s*DIRECT DEBIT PAYMENT\s*$", re.IGNORECASE)
 _PAYING_SIDE_RE = re.compile(r"\bNAB CARD AUTOPAY\b", re.IGNORECASE)
@@ -33,28 +32,6 @@ def is_card_payment(raw_description: str, amount: float) -> bool:
     return False
 
 
-def mark_as_lone_transfer(tx: Transaction) -> None:
-    """Type one row as a Transfer with no counterpart row; its category no longer means anything."""
-    tx.type = "Transfer"
-    tx.category = None
-    tx.subcategory = None
-    tx.is_refund = False
-    if tx.needs_review_reason is None or should_supersede(tx.needs_review_reason, TRANSFER_MATCH):
-        tx.needs_review = False
-        tx.needs_review_reason = None
-
-
 def reclassify_card_payments(session: Session) -> int:
     """Type stored, still-unpaired card payments as `Transfer`. Idempotent; the caller commits."""
-    rows = (
-        session.query(Transaction)
-        .filter(Transaction.type != "Transfer", Transaction.superseded_by_id.is_(None))
-        .all()
-    )
-    changed = 0
-    for tx in rows:
-        if is_card_payment(tx.raw_description, tx.amount):
-            mark_as_lone_transfer(tx)
-            changed += 1
-    session.flush()
-    return changed
+    return reclassify_where(session, is_card_payment)

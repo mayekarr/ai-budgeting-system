@@ -355,3 +355,10 @@ def test_airline_rule_files_air_lanka_under_flights(session):
     seed_rules_if_empty(session)
     match = match_rule(session, "AIR LANKA IRLINES LIMITKATUNAYAKE")
     assert (match.category, match.subcategory) == ("Travel & Holidays", "Flights")
+
+
+def test_extra_repayment_rule_is_specific_to_the_monthly_payment_wording(session):
+    seed_rules_if_empty(session)
+    assert match_rule(session, "ONLINE G5538115221 Month ex loanrepay MAYEKAR A") is not None
+    other = match_rule(session, "Payment ref ex loanrepay for J Smith")
+    assert other is None or other.subcategory != "Loan Repayment"

@@ -20,8 +20,7 @@ import re
 
 from sqlalchemy.orm import Session
 
-from backend.models import Transaction
-from backend.needs_review_reasons import TRANSFER_MATCH, should_supersede
+from transfers.lone_transfers import reclassify_where
 
 _DRAWDOWN_RE = re.compile(r"\b(?:LOAN|REDRAW) PROCEEDS FROM A/C\b", re.IGNORECASE)
 # "<own account nickname> to <loan name> HL", e.g. "JC to Barkly HL": a two-letter upper-case
@@ -40,24 +39,8 @@ def is_loan_movement(raw_description: str, amount: float) -> bool:
 
 def reclassify_loan_movements(session: Session) -> int:
     """
-    Type already-stored loan movements as `Transfer` (the upload path does this for new rows).
-    Clears a review flag that is moot once the row is a Transfer, same rule as a transfer link;
-    `unrecognised_account` is about the account, so it stays. Idempotent. The caller commits.
-    Returns how many rows changed.
+    Type already-stored loan movements as `Transfer` (the upload path does this for new rows), clearing
+    the moot category and any review flag a transfer link would also clear; `unrecognised_account` is
+    about the account, so it stays. Idempotent. The caller commits. Returns how many rows changed.
     """
-    changed = 0
-    # .all(): the loop changes `type`, which the filter reads, so don't iterate a live query.
-    rows = (
-        session.query(Transaction)
-        .filter(Transaction.type != "Transfer", Transaction.superseded_by_id.is_(None))
-        .all()
-    )
-    for tx in rows:
-        if not is_loan_movement(tx.raw_description, tx.amount):
-            continue
-        tx.type = "Transfer"
-        if tx.needs_review_reason is None or should_supersede(tx.needs_review_reason, TRANSFER_MATCH):
-            tx.needs_review = False
-            tx.needs_review_reason = None
-        changed += 1
-    return changed
+    return reclassify_where(session, is_loan_movement)

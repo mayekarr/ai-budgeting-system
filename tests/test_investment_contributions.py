@@ -64,3 +64,19 @@ def test_reclassify_is_idempotent(session):
     _tx(session, "30774608 0003 MLC MKIS Rohan & Anila Ma", -750.0)
     reclassify_investment_contributions(session)
     assert reclassify_investment_contributions(session) == 0
+
+
+@pytest.mark.parametrize("description", [
+    "30774608 0003 MLC  MKIS Rohan & Anila Ma",     # doubled space in the export
+    "30774608 0003 MLC\tMKIS Rohan & Anila Ma",
+])
+def test_spacing_variants_are_still_contributions(description):
+    assert is_investment_contribution(description, -750.0) is True
+
+
+@pytest.mark.parametrize("description", [
+    "30774608 0097 MLC MKIS CREDIT Rohan & Anila Ma",     # CREDIT without the S
+    "30774608 0097 MLC  MKIS  CREDITS Rohan & Anila Ma",
+])
+def test_credit_wording_variants_are_not_contributions(description):
+    assert is_investment_contribution(description, -10.0) is False

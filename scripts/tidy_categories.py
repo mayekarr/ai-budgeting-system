@@ -21,8 +21,8 @@ from backend.database import create_tables, session_scope
 from categorisation.recategorise import recategorise_unreviewed
 from categorisation.seed_rules import add_missing_seed_rules
 from transfers.card_payments import reclassify_card_payments
-from transfers.investment_contributions import reclassify_investment_contributions
 from transfers.cleanup import clear_transfer_categories
+from transfers.investment_contributions import reclassify_investment_contributions
 
 
 def main() -> int:

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 One-off tidy-up for Transfer rows that still carry a category from before they became a Transfer.
 
@@ -8,6 +6,8 @@ a raw query or a drill-in. A tentative pair (Tier-2 Medium, confidence below 1.0
 because rejecting the match restores the row to Income/Expense and needs its category back. New
 confident links already clear the category as they are made (`link_transfer_pair`).
 """
+
+from __future__ import annotations
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session

@@ -123,3 +123,14 @@ def test_reclassify_ignores_superseded_and_already_transfer_rows(session):
     assert reclassify_loan_movements(session) == 1  # only the settled row
     assert pending.type == "Expense"
     assert linked.type == "Transfer"
+
+
+def test_reclassify_also_clears_the_stale_category_like_the_upload_path(session):
+    account_id = session.info["account_id"]
+    tx = Transaction(account_id=account_id, date=date(2025, 9, 8), amount=900000.0,
+                     raw_description="LOAN PROCEEDS FROM A/C 34-188-5257", type="Income",
+                     category="Income", subcategory="Other")
+    session.add(tx)
+    session.commit()
+    assert reclassify_loan_movements(session) == 1
+    assert tx.type == "Transfer" and tx.category is None and tx.subcategory is None

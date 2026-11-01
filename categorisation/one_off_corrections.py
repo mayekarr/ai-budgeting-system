@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Per-transaction one-off corrections (docs/product-requirements.md FR-9j/FR-9k).
 
@@ -9,6 +7,8 @@ list is applied idempotently (a re-run changes 0 rows), so it can be replayed af
 rebuild. Unlike the PATCH correction endpoint, this deliberately creates NO categorisation rule:
 a one-off must not generalise to future rows with similar text.
 """
+
+from __future__ import annotations
 
 import json
 import logging

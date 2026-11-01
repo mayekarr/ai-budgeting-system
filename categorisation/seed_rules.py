@@ -204,7 +204,7 @@ SEED_RULES: list[dict] = [
     # stay Expense (J6's cash-flow view). "ex loanrepay" (no space) is Rohan's monthly extra
     # repayment on the Hillside mortgage (2026-11-01).
     dict(pattern='LOAN INSTALMENT TO A/C', match_type="substring", category='Loans & Finance', subcategory='Loan Repayment', priority=127),
-    dict(pattern='EX LOANREPAY', match_type="substring", category='Loans & Finance', subcategory='Loan Repayment', priority=127),
+    dict(pattern='MONTH EX LOANREPAY', match_type="substring", category='Loans & Finance', subcategory='Loan Repayment', priority=127),
     dict(pattern='AIR LANKA', match_type="substring", category='Travel & Holidays', subcategory='Flights', priority=108),
     # Real, unambiguous merchants reported live by Rohan, each independently confirmed against the
     # real xlsx's own bank Category/Merchant Name columns (Donations/Oxfam Australia; Insurance/

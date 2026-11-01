@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Re-apply the current categorisation rules to rows the rules could not place at upload time.
 
@@ -10,6 +8,8 @@ never a Transfer. A review flag about the category (`llm_unavailable` / `low_con
 cleared once a rule places the row; any other flag (`unrecognised_account`, or one with no stored reason) stays live. Idempotent.
 The caller commits.
 """
+
+from __future__ import annotations
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session

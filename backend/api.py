@@ -27,9 +27,9 @@ from transfers.detection import (
     link_transfer_pair,
     process_transfer_detection,
 )
-from transfers.card_payments import is_card_payment, mark_as_lone_transfer
-from transfers.investment_contributions import is_investment_contribution
-from transfers.loan_movements import is_loan_movement
+from transfers.card_payments import is_card_payment
+from transfers.lone_transfers import mark_as_lone_transfer
+from transfers.text_transfers import is_text_only_transfer
 from transfers.refunds import detect_refund
 
 from .database import SessionLocal, bulk_save_transactions, create_tables, engine  # noqa: F401  (engine kept for test monkeypatching)
@@ -298,8 +298,7 @@ async def upload_transactions(
             tx_type = "Income"
             cat_needs_review = False
 
-        if is_loan_movement(row.raw_description, row.amount) or is_investment_contribution(
-                row.raw_description, row.amount):
+        if is_text_only_transfer(row.raw_description, row.amount):
             # A drawdown/redraw or lump-sum loan paydown moves the user's own borrowed money
             # (FR-9f/FR-9i). The loan statement isn't imported, so detection can't pair it; the
             # text alone decides. Its category no longer matters, so a category flag is moot.
