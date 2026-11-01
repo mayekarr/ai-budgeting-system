@@ -760,3 +760,65 @@ def test_tiers_can_be_run_as_separate_passes_so_row_order_cannot_decide_the_outc
         session.refresh(tx)
     assert credit.transfer_group_id == debit.transfer_group_id is not None
     assert intruder.transfer_group_id is None
+
+
+# --- 2026-11-01: the bank's own Category column ---------------------------------------------------------
+
+def _categorised(tx, bank_category):
+    tx.raw_bank_category = bank_category
+    return tx
+
+
+@pytest.mark.parametrize("bank_category", ["Donations", "Refund", "Groceries", "Restaurants & takeaway"])
+def test_tier2_never_pairs_a_row_the_bank_categorises_as_something_else(session, bank_category):
+    # Oxfam -50 ("Donations") against a friend's +50 gift ("Transfers in") is not a transfer.
+    a = _account(session, "A")
+    b = _account(session, "B")
+    odd = _categorised(_tx(session, a, date(2026, 8, 5), -50.00, "OXFAM", "TRANSFER DEBIT"), bank_category)
+    partner = _categorised(_tx(session, b, date(2026, 8, 5), 50.00, "GIFT", "TRANSFER CREDIT"), "Transfers in")
+    session.commit()
+
+    process_transfer_detection(session, odd)
+    process_transfer_detection(session, partner)
+
+    session.refresh(odd)
+    session.refresh(partner)
+    assert odd.transfer_group_id is None and partner.transfer_group_id is None
+
+
+@pytest.mark.parametrize("out_category, in_category", [
+    ("Internal transfers", "Internal transfers"),
+    ("Transfers out", "Transfers in"),               # the older statements label own-account moves this way
+    ("Credit card repayments", "Internal transfers"),
+    ("Investments", "Investment income"),
+    ("Transfers out", "Income"),                      # salary moved into the joint account
+    (None, None),                                     # a statement format with no category column
+])
+def test_tier2_still_pairs_rows_the_bank_categorises_as_transfers(session, out_category, in_category):
+    a = _account(session, "A")
+    b = _account(session, "B")
+    out = _categorised(_tx(session, a, date(2026, 8, 5), -50.00, "X", "TRANSFER DEBIT"), out_category)
+    inn = _categorised(_tx(session, b, date(2026, 8, 5), 50.00, "Y", "TRANSFER CREDIT"), in_category)
+    session.commit()
+
+    process_transfer_detection(session, out)
+    process_transfer_detection(session, inn)
+
+    session.refresh(out)
+    session.refresh(inn)
+    assert out.transfer_group_id is not None and out.transfer_group_id == inn.transfer_group_id
+
+
+def test_a_reference_match_is_not_blocked_by_the_banks_category(session):
+    # Tier 1 rests on a shared reference or account number, which is stronger than any label.
+    a = _account(session, "A")
+    b = _account(session, "B")
+    out = _categorised(_tx(session, a, date(2026, 8, 5), -50.00, "ONLINE Q7777777777 thing", "TRANSFER DEBIT"), "Other")
+    inn = _categorised(_tx(session, b, date(2026, 8, 5), 50.00, "ONLINE Q7777777777 thing", "TRANSFER CREDIT"), "Other")
+    session.commit()
+
+    process_transfer_detection(session, out)
+
+    session.refresh(out)
+    session.refresh(inn)
+    assert out.transfer_group_id is not None and out.transfer_group_id == inn.transfer_group_id

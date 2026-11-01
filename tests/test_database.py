@@ -163,3 +163,29 @@ def test_settlement_outside_date_window_does_not_link(session, account):
     assert pending.superseded_by_id is None
     assert later.superseded_by_id is None
     assert session.query(Transaction).count() == 2
+
+
+def test_the_banks_own_category_is_saved_with_the_row(session, account):
+    save_transaction(session, account_id=account.id, date=date(2026, 5, 11), amount=-30.0,
+                     raw_description="ONLINE N6414309103 Arvan food", raw_bank_category="Internal transfers")
+    session.commit()
+    assert session.query(Transaction).one().raw_bank_category == "Internal transfers"
+    bulk_save_transactions(session, [dict(account_id=account.id, date=date(2026, 5, 12), amount=-5.0,
+                                          raw_description="COFFEE", raw_bank_category="Cafe & coffee")])
+    session.commit()
+    assert session.query(Transaction).filter_by(raw_description="COFFEE").one().raw_bank_category == "Cafe & coffee"
+
+
+def test_add_missing_columns_upgrades_an_existing_database_in_place_and_is_idempotent():
+    from sqlalchemy import inspect, text
+    from backend.database import add_missing_columns
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(bind=engine)
+    with engine.begin() as conn:
+        conn.execute(text("alter table transactions drop column raw_bank_category"))   # an older database
+    assert "raw_bank_category" not in {c["name"] for c in inspect(engine).get_columns("transactions")}
+
+    assert add_missing_columns(engine) == ["transactions.raw_bank_category"]
+    assert "raw_bank_category" in {c["name"] for c in inspect(engine).get_columns("transactions")}
+    assert add_missing_columns(engine) == []

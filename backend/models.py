@@ -165,6 +165,9 @@ class Transaction(Base):
     confidence_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     raw_transaction_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    # The bank's own "Category" column (e.g. "Internal transfers"), kept so transfer detection can
+    # refuse a pairing whose rows the bank files as a donation, refund, groceries and so on.
+    raw_bank_category: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     balance: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(

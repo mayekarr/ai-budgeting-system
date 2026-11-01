@@ -5,7 +5,7 @@ from datetime import timedelta
 from typing import Generator, Iterable, List, Mapping, Optional
 
 import logging
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import Base, Transaction
@@ -29,10 +29,32 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
+def add_missing_columns(target_engine) -> list[str]:
+    """
+    Add any nullable column the models define but an existing database lacks (SQLite's create_all only
+    creates whole tables). Additive and idempotent; returns the "table.column" names it added.
+    """
+    added: list[str] = []
+    inspector = inspect(target_engine)
+    for table in Base.metadata.sorted_tables:
+        if not inspector.has_table(table.name):
+            continue
+        existing = {c["name"] for c in inspector.get_columns(table.name)}
+        for column in table.columns:
+            if column.name in existing or not column.nullable or column.primary_key:
+                continue
+            ddl_type = column.type.compile(dialect=target_engine.dialect)
+            with target_engine.begin() as conn:
+                conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {ddl_type}'))
+            added.append(f"{table.name}.{column.name}")
+    return added
+
+
 def create_tables() -> None:
-    """Create database tables if they do not already exist."""
+    """Create database tables if they do not already exist, and add any column an older database lacks."""
     logger.info("Creating database tables if they do not exist.")
     Base.metadata.create_all(bind=engine)
+    add_missing_columns(engine)
 
 
 def get_session() -> Generator[Session, None, None]:
@@ -170,6 +192,7 @@ def save_transaction(
     raw_transaction_type: Optional[str] = None,
     balance: Optional[float] = None,
     asset_id: Optional[int] = None,
+    raw_bank_category: Optional[str] = None,
 ) -> Optional[Transaction]:
     """
     Persist a single transaction, skipping it if it's a duplicate of an existing row (FR-3), and
@@ -203,6 +226,7 @@ def save_transaction(
         needs_review_reason=needs_review_reason,
         confidence_score=confidence_score,
         raw_transaction_type=raw_transaction_type,
+        raw_bank_category=raw_bank_category,
         balance=balance,
         superseded_by_id=superseded_by_id,
         asset_id=asset_id,
@@ -250,6 +274,7 @@ def bulk_save_transactions(session: Session, transactions: Iterable[Mapping]) ->
             raw_transaction_type=t.get("raw_transaction_type"),
             balance=t.get("balance"),
             asset_id=t.get("asset_id"),
+            raw_bank_category=t.get("raw_bank_category"),
         )
         if result is not None:
             saved.append(result)

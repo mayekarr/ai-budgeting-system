@@ -14,7 +14,8 @@ Tier 2 (heuristic pairing, J5, docs/design-logic-and-ux.md §2.3): when Tier 1 f
 back to the same amount on another of the user's accounts within a couple of business days. The amount
 must match exactly (Rohan, 2026-11-01: a transfer between his own accounts matches to the cent; a
 near-equal amount is a coincidence) and neither row may be of a bank type that is never a transfer
-(a card purchase, fee, ATM withdrawal, ...). Two confidence bands:
+(a card purchase, fee, ATM withdrawal, ...) or carry a bank Category that plainly isn't one (Donations,
+Refund, Groceries, ...). Two confidence bands:
   - High (same day): auto-tagged Transfer, no review.
   - Medium (within the window): auto-tagged Transfer, but flagged needs_review as a soft confirmation.
 
@@ -57,6 +58,24 @@ NON_TRANSFER_BANK_TYPES = frozenset({
 
 def can_be_transfer_leg(tx: Transaction) -> bool:
     return (tx.raw_transaction_type or "").strip().upper() not in NON_TRANSFER_BANK_TYPES
+
+
+# The bank's own Category values a transfer leg can carry (Rohan, 2026-11-01: internal transfers say
+# "Internal transfers"). Read from the real statements: "Internal transfers" for moves between NAB
+# accounts, "Credit card repayments" on the paying side of a card payment, and "Transfers out/in" (with
+# "Income", "Investments", "Investment income") for the older statements and for money going to or
+# coming from another bank. Anything else (Donations, Refund, Groceries, ...) is plainly not a transfer.
+# The label is over-inclusive (it also covers other people's NAB accounts), so it can rule a pairing out
+# but never prove one. A row with no category (a format without the column) is allowed.
+TRANSFER_LIKE_BANK_CATEGORIES = frozenset({
+    "internal transfers", "transfers in", "transfers out", "credit card repayments",
+    "investments", "investment income", "income",
+})
+
+
+def bank_category_allows_transfer(tx: Transaction) -> bool:
+    category = (tx.raw_bank_category or "").strip().lower()
+    return not category or category in TRANSFER_LIKE_BANK_CATEGORIES
 
 
 # Income that is a deliberate, confident classification and must never be paired with another row on
@@ -283,7 +302,11 @@ def _find_tier2_candidates(session: Session, tx: Transaction) -> list[tuple[Tran
     )
     candidates = []
     for row in rows:
-        if not _amounts_exact_opposite(tx.amount, row.amount) or not can_be_transfer_leg(row):
+        if (
+            not _amounts_exact_opposite(tx.amount, row.amount)
+            or not can_be_transfer_leg(row)
+            or not bank_category_allows_transfer(row)
+        ):
             continue
         candidates.append((row, _tier2_band(tx.date, row.date)))
     return candidates
@@ -336,7 +359,7 @@ def _flag_unresolved_tie_losers(others: list[Transaction]) -> None:
 
 
 def _process_tier2(session: Session, tx: Transaction) -> None:
-    if is_never_transfer(tx) or not can_be_transfer_leg(tx):
+    if is_never_transfer(tx) or not can_be_transfer_leg(tx) or not bank_category_allows_transfer(tx):
         return
     found = _best_tier2_candidate(session, tx)
     if found is None:
@@ -410,7 +433,7 @@ def find_suggested_transfer_match(session: Session, tx: Transaction) -> Optional
     for a transaction flagged needs_review with reason=transfer_match but not yet linked, for the
     review-queue API to show a suggested counterpart without persisting an unconfirmed link.
     """
-    if not can_be_transfer_leg(tx):
+    if not can_be_transfer_leg(tx) or not bank_category_allows_transfer(tx):
         return None
     found = _best_tier2_candidate(session, tx)
     return found[0] if found else None

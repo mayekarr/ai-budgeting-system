@@ -583,3 +583,11 @@ def test_upload_types_a_debit_to_the_macquarie_account_as_a_transfer(client):
     assert _upload(client, csv).status_code == 201
     row = client.get("/transactions").json()[0]
     assert row["type"] == "Transfer" and row["category"] is None and row["transfer_group_id"] is None
+
+
+def test_upload_keeps_the_banks_own_category(client):
+    csv = _UPLOAD_HEADER + "2026-05-11,-30.00,147912573,TRANSFER DEBIT,ONLINE N6414309103 Arvan food,500.00,Internal transfers,,\n"
+    assert _upload(client, csv).status_code == 201
+    with api_module.SessionLocal() as session:
+        from backend.models import Transaction
+        assert session.query(Transaction).one().raw_bank_category == "Internal transfers"

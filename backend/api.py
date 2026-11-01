@@ -370,6 +370,7 @@ async def upload_transactions(
                 "needs_review_reason": needs_review_reason,
                 "confidence_score": confidence,
                 "raw_transaction_type": row.raw_transaction_type,
+                "raw_bank_category": row.raw_bank_category,
                 "balance": row.balance,
                 "asset_id": attribute_asset(row.raw_description, resolved.account.id, asset_lookups),
             }
