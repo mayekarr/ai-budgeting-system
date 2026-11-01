@@ -194,6 +194,11 @@ SEED_RULES: list[dict] = [
     dict(pattern='P & G REAL ESTAT', match_type="substring", category='Income', subcategory='Rental Income', priority=130),
     dict(pattern='WHITEHORSE EASTE', match_type="substring", category='Income', subcategory='Rental Income', priority=130),
     dict(pattern='MT ALEXAN ACCORD REAL EST', match_type="substring", category='Income', subcategory='Rental Income', priority=130),
+    # Employer reimbursements of travel expenses Rohan already paid (Rohan, 2026-11-01): the credit
+    # reads "ROHAN MAYEKAR<optional 'transfer'>Sydney travel/expenses...". Filed under the category of
+    # the spend it repays so GET /summary nets it against that spend instead of counting it as income.
+    # The MAYEKAR prefix keeps ordinary Sydney merchants (IINET LTD N SYDNEY) out.
+    dict(pattern=r'MAYEKAR\s*(TRANSFER\s*)?SYDNEY', match_type="regex", category='Travel & Holidays', subcategory='Other', priority=130),
     # Real, unambiguous merchants reported live by Rohan, each independently confirmed against the
     # real xlsx's own bank Category/Merchant Name columns (Donations/Oxfam Australia; Insurance/
     # Allianz Insurance) -- see the "using bank Category/Merchant Name" note in docs/next-steps.md.

@@ -522,6 +522,7 @@ are treated. Everything below applies to refunds generally, tax refunds excepted
     RC is a `Transfer` (already linked); the RC +$3,000 `transfer sydney expe` came from the user's
     **NBA (CBA) account**, so it is a `Transfer` that stays unpaired until the NBA parser exists
     (item 5), not `Income`.
+    **Update 2026-11-01 (Rohan):** the 'transfer sydney expe / Sydney travel expenses' credits on RC (8 rows, including the 2026-09-30 $3,000) are the **employer reimbursing travel expenses already paid**. They net against Travel & Holidays (a seeded rule), not `Income`; once NBA is parsed, the NBA to RC movement pairs as a `Transfer` and the employer credit on NBA is the real reimbursement. Valsala Mathew and Ramesh Kambala credits are family-loan repayments (`Income` / `Other`).
   **Found 2026-10-11 — the CC long export repeats five 90-row blocks (an export-stitching
   artifact).** At every 1,000-row boundary (file rows 2000, 3000, 4000, 5000, 6000) the file jumps
   back and re-lists the 90 rows that ended the previous chunk (e.g. row 1999 is 2024-12-20 and row

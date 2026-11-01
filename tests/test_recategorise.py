@@ -54,13 +54,21 @@ def test_row_without_a_matching_rule_is_left_alone(session):
     assert tx.category == "Miscellaneous" and tx.needs_review is True
 
 
-def test_transfers_and_rows_with_other_review_reasons_are_not_touched(session):
+def test_transfers_are_not_touched(session):
     transfer = _tx(session, "P & G REAL ESTAT", type="Transfer", needs_review=False, needs_review_reason=None)
-    other = _tx(session, "P & G REAL ESTAT", needs_review_reason="unrecognised_account")
     assert recategorise_unreviewed(session) == 0
     session.refresh(transfer)
-    session.refresh(other)
-    assert transfer.category == "Miscellaneous" and other.category == "Miscellaneous"
+    assert transfer.category == "Miscellaneous"
+
+
+def test_an_unrelated_review_reason_is_kept_while_the_category_is_applied(session):
+    # unrecognised_account is about the account, not the category: a rule match still applies,
+    # but the account flag stays live.
+    tx = _tx(session, "P & G REAL ESTAT", needs_review_reason="unrecognised_account", confidence_score=0.0)
+    assert recategorise_unreviewed(session) == 1
+    session.refresh(tx)
+    assert tx.subcategory == "Rental Income"
+    assert tx.needs_review is True and tx.needs_review_reason == "unrecognised_account"
 
 
 def test_a_manually_corrected_row_is_not_overwritten(session):

@@ -302,3 +302,24 @@ def test_every_rental_agent_seen_in_the_real_data_maps_to_rental_income(session,
     seed_rules_if_empty(session)
     match = match_rule(session, description)
     assert (match.category, match.subcategory) == ("Income", "Rental Income")
+
+
+@pytest.mark.parametrize("description", [
+    "ROHAN MAYEKAR Sydney travel expens",
+    "ROHAN MAYEKARSydney travel expens",
+    "ROHAN MAYEKARtransfer sydney exp",
+    "ROHAN MAYEKARtransfer sydney expe",
+    "ROHAN MAYEKARsydney expenses",
+    "ROHAN MAYEKARsydney travel busine",
+])
+def test_employer_sydney_travel_reimbursements_net_against_travel(session, description):
+    seed_rules_if_empty(session)
+    match = match_rule(session, description)
+    assert (match.category, match.subcategory) == ("Travel & Holidays", "Other")
+
+
+@pytest.mark.parametrize("description", ["IINET LTD N SYDNEY", "T20 WORLD CUP SYDNEY", "Menulog Pty Ltd Sydney"])
+def test_ordinary_sydney_merchants_are_not_treated_as_reimbursements(session, description):
+    seed_rules_if_empty(session)
+    match = match_rule(session, description)
+    assert match is None or match.category != "Travel & Holidays"
