@@ -29,15 +29,15 @@ def _tx(session, tx_type, group=None):
     return tx
 
 
-def _group(session, confidence):
-    group = TransferGroup(detection_tier=2, confidence=confidence)
+def _group(session, confidence, tier=2):
+    group = TransferGroup(detection_tier=tier, confidence=confidence)
     session.add(group)
     session.commit()
     return group
 
 
-def test_confident_and_groupless_transfers_lose_their_stale_category(session):
-    grouped = _tx(session, "Transfer", _group(session, 1.0))
+def test_tier1_and_groupless_transfers_lose_their_stale_category(session):
+    grouped = _tx(session, "Transfer", _group(session, 1.0, tier=1))
     lone = _tx(session, "Transfer")
     assert clear_transfer_categories(session) == 2
     for tx in (grouped, lone):
@@ -45,13 +45,15 @@ def test_confident_and_groupless_transfers_lose_their_stale_category(session):
         assert tx.category is None and tx.subcategory is None
 
 
-def test_tentative_pairs_and_non_transfers_keep_their_category(session):
+def test_tier2_pairs_and_non_transfers_keep_their_category(session):
+    # Tier 2 is amount-and-date only, so a stronger match can still send the row back to income/expense.
     tentative = _tx(session, "Transfer", _group(session, 0.6))
+    confident_tier2 = _tx(session, "Transfer", _group(session, 1.0))
     expense = _tx(session, "Expense")
     assert clear_transfer_categories(session) == 0
-    session.refresh(tentative)
-    session.refresh(expense)
-    assert tentative.category == "Miscellaneous" and expense.category == "Miscellaneous"
+    for tx in (tentative, confident_tier2, expense):
+        session.refresh(tx)
+        assert tx.category == "Miscellaneous"
 
 
 def test_rerun_changes_nothing(session):

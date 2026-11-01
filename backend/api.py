@@ -30,6 +30,7 @@ from transfers.detection import (
     process_transfer_detection,
 )
 from transfers.card_payments import is_card_payment
+from transfers.own_accounts import is_own_account_transfer
 from transfers.lone_transfers import mark_as_lone_transfer
 from transfers.refunds import detect_refund
 
@@ -233,6 +234,7 @@ class TransferPairOut(BaseModel):
     group_id: int
     detection_tier: int
     confidence: float
+    needs_check: bool
     date: date_type
     amount: float
     legs: List[TransferLegOut]
@@ -332,6 +334,10 @@ async def upload_transactions(
 
         if capital_tag is not None:
             tx_type = capital_tag.type  # Income / Expense by the kind of event, not just the sign
+        elif is_own_account_transfer(row.raw_description, row.amount):
+            # Sent to the user's own Macquarie account, whose statements aren't imported yet: a
+            # Transfer by its text, and not a candidate for amount-only pairing.
+            tx_type, category, subcategory, cat_needs_review = "Transfer", None, None, False
 
         # A Transfer or a capital event is neither a refund nor refund-ambiguous, whatever the
         # refund rules saw.
@@ -386,10 +392,17 @@ async def upload_transactions(
     # are excluded too: they're a deliberate, confident classification, and a coincidental
     # amount/date match against an unrelated transaction on another account must not be allowed
     # to overwrite it into a Transfer.
+    # Two passes over the whole upload, so the order the rows arrive in cannot decide the outcome:
+    # every account-number / reference match (Tier 1) first, then amount-and-date matches (Tier 2)
+    # on whatever is left. Exact amounts only; see transfers/detection.py.
+    detectable = [tx for tx in saved_rows if tx.type != "Transfer" and not is_never_transfer(tx)]
+    for tx in detectable:
+        process_transfer_detection(db, tx, tiers=(1,))
+    for tx in detectable:
+        process_transfer_detection(db, tx, tiers=(2,))
+
     card_payments_marked = False
     for tx in saved_rows:
-        if tx.type != "Transfer" and not is_never_transfer(tx):
-            process_transfer_detection(db, tx)
         # A card payment detection could not pair (its counterpart isn't imported yet) is still a
         # Transfer by its text alone; a later-arriving counterpart pairs with it via Tier 1.
         if tx.type != "Transfer" and is_card_payment(tx.raw_description, tx.amount):

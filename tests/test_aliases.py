@@ -67,3 +67,10 @@ def test_number_alias_with_trailing_whitespace_still_matches():
     # bake the newline into the pattern, so it could never match. The identifier is stripped first.
     assert alias_matches_text("703206283\n", "TO A/C 703206283 MAYEKAR") is True
     assert alias_matches_text(" 34-188-5257 ", "A/C 341885257") is True
+
+
+def test_account_numbers_match_whatever_mix_of_spaces_and_dashes_the_bank_uses():
+    assert alias_matches_text("703206283", "REDRAW PROCEEDS FROM A/C 70 320 6283") is True
+    assert alias_matches_text("70 320 6283", "REDRAW PROCEEDS FROM A/C 70-320-6283") is True
+    assert alias_matches_text("70-320-6283", "ref 703206283 paid") is True
+    assert alias_matches_text("703206283", "ref 7032062831 paid") is False     # not inside a longer number

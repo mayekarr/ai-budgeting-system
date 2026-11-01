@@ -10,7 +10,7 @@ means.
 import re
 
 _MASKING_RUN_RE = re.compile(r"[xX]{3,}")
-_ACCOUNT_NUMBER_RE = re.compile(r"[\d-]*\d[\d-]*")  # digits and dashes only, at least one digit
+_ACCOUNT_NUMBER_RE = re.compile(r"[\d\s-]*\d[\d\s-]*")  # digits, dashes and spaces only, at least one digit
 _NEVER_MATCHES = re.compile(r"(?!)")  # a regex that cannot match any string
 
 
@@ -28,10 +28,10 @@ def alias_pattern(raw_identifier: str) -> re.Pattern:
     """
     if _ACCOUNT_NUMBER_RE.fullmatch(raw_identifier.strip()):
         # The bank writes the same loan as "703206283" in one line and "70-320-6283" in another,
-        # so a dash may sit between any two digits, whichever form was registered.
-        digits = raw_identifier.strip().replace("-", "")
+        # so a dash or a space may sit between any two digits, whichever form was registered.
+        digits = re.sub(r"[\s-]", "", raw_identifier)
         # Not inside a longer digit run: a loan number must not match part of a reference or amount.
-        return re.compile(r"(?<!\d)" + "-?".join(digits) + r"(?!\d)")
+        return re.compile(r"(?<!\d)" + r"[\s-]?".join(digits) + r"(?!\d)")
     if _MASKING_RUN_RE.search(raw_identifier):
         parts = _MASKING_RUN_RE.split(raw_identifier)
         if not any(p.strip() for p in parts):

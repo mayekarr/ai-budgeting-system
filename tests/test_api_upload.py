@@ -546,3 +546,40 @@ def test_upload_does_not_spend_an_llm_call_on_a_row_whose_text_already_decides_i
     assert _upload(client, csv).status_code == 201
     row = client.get("/transactions").json()[0]
     assert (row["type"], row["subcategory"]) == ("Income", "Loan Drawdown")
+
+
+def test_upload_pairs_the_real_transfer_and_leaves_a_same_amount_card_purchase_alone(client):
+    # The card purchase has the same amount on the same day as a real transfer, and comes first in
+    # the file. It must not take the transfer's credit, and the transfer must still pair.
+    csv = (
+        _UPLOAD_HEADER
+        + "2026-03-03,-30.00,Card ending 2957,CREDIT CARD PURCHASE,Mater Lotteries Brisbane,-100.00,,,\n"
+        + "2026-03-03,30.00,147912186,TRANSFER CREDIT,ONLINE G1459687961 JC to AC MAYEKAR A,500.00,,,\n"
+        + "2026-03-03,-30.00,147912573,TRANSFER DEBIT,ONLINE G1459687961 JC to AC MAYEKAR A,1000.00,,,\n"
+    )
+    assert _upload(client, csv).status_code == 201
+    rows = client.get("/transactions").json()
+    shop = next(r for r in rows if "Mater" in r["raw_description"])
+    legs = [r for r in rows if "JC to AC" in r["raw_description"]]
+    assert shop["type"] == "Expense" and shop["transfer_group_id"] is None
+    assert {r["type"] for r in legs} == {"Transfer"} and len({r["transfer_group_id"] for r in legs}) == 1
+    assert legs[0]["transfer_group_id"] is not None
+
+
+def test_upload_never_pairs_amounts_that_are_only_close(client):
+    csv = (
+        _UPLOAD_HEADER
+        + "2026-03-03,-100.00,147912573,TRANSFER DEBIT,SOMETHING OUT,1000.00,,,\n"
+        + "2026-03-03,101.50,147912186,TRANSFER CREDIT,SOMETHING IN,500.00,,,\n"
+    )
+    assert _upload(client, csv).status_code == 201
+    rows = client.get("/transactions").json()
+    assert {r["type"] for r in rows} == {"Expense", "Income"}
+    assert all(r["transfer_group_id"] is None for r in rows)
+
+
+def test_upload_types_a_debit_to_the_macquarie_account_as_a_transfer(client):
+    csv = _UPLOAD_HEADER + "2025-12-10,-100000.00,147912573,TRANSFER DEBIT,ANILA ROHANMAYEKAR M4535156818 JC to Macquarie,500.00,,,\n"
+    assert _upload(client, csv).status_code == 201
+    row = client.get("/transactions").json()[0]
+    assert row["type"] == "Transfer" and row["category"] is None and row["transfer_group_id"] is None

@@ -18,8 +18,10 @@ def _fake_transfers(*args, **kwargs):
     return {
         "pairs": [
             {"group_id": 20, "detection_tier": 2, "confidence": 0.6, "date": "2026-08-10", "amount": 100.0,
+             "needs_check": True,
              "legs": [_leg(3, "AC", -100.0, "LOOKS LIKE A TRANSFER"), _leg(4, "CC", 99.5, "UBER TRIP")]},
             {"group_id": 10, "detection_tier": 1, "confidence": 1.0, "date": "2026-06-01", "amount": 1000.0,
+             "needs_check": False,
              "legs": [_leg(1, "JC", -1000.0, "JC to AC"), _leg(2, "AC", 1000.0, "AC from JC")]},
         ],
         "lone": [_leg(5, "CC", 500.0, "DIRECT DEBIT PAYMENT", d="2026-07-05")],
@@ -55,7 +57,7 @@ def test_page_shows_counts_of_pairs_tentative_pairs_and_lone_transfers():
     assert [m.value for m in at.metric] == ["2", "1", "1"]
     pairs = at.dataframe[0].value
     assert list(pairs["Amount"]) == [100.0, 1000.0]
-    assert list(pairs["Confidence"]) == ["Tentative (60%)", "Confident"]
+    assert list(pairs["Confidence"]) == ["Check: tentative (60%)", "Confident"]
     assert list(pairs["From"]) == ["AC", "JC"] and list(pairs["To"]) == ["CC", "AC"]
     lone = at.dataframe[1].value
     assert list(lone["Description"]) == ["DIRECT DEBIT PAYMENT"]
@@ -88,15 +90,15 @@ def test_choosing_an_account_filters_by_its_id():
     assert mock_get.call_args.kwargs["account_id"] == 3
 
 
-def test_tentative_only_toggle_narrows_the_pairs_table():
+def test_pairs_to_check_toggle_narrows_the_pairs_table():
     p_transfers, p_accounts = _patched()
     with p_transfers, p_accounts:
         at = _open()
         at.run()
-        at.toggle(key="transfers_tentative_only").set_value(True).run()
+        at.toggle(key="transfers_check_only").set_value(True).run()
 
     assert not at.exception
-    assert list(at.dataframe[0].value["Confidence"]) == ["Tentative (60%)"]
+    assert list(at.dataframe[0].value["Confidence"]) == ["Check: tentative (60%)"]
 
 
 def test_only_tentative_pairs_get_a_not_a_transfer_button_and_it_unlinks_via_the_first_leg():
@@ -179,3 +181,36 @@ def test_no_warning_when_every_pair_has_two_legs():
         at = _open()
         at.run()
     assert not at.warning
+
+
+def _with_a_confident_but_wrong_looking_pair(*args, **kwargs):
+    data = _fake_transfers()
+    data["pairs"].insert(0, {
+        "group_id": 40, "detection_tier": 2, "confidence": 1.0, "date": "2026-09-05", "amount": 50.0,
+        "needs_check": True,
+        "legs": [_leg(9, "JC", -50.0, "OXFAM AUSTRALIA"), _leg(10, "AC", 50.0, "gift from a friend")],
+    })
+    return data
+
+
+def test_a_confident_pair_flagged_for_checking_gets_the_unlink_button_too():
+    p_transfers, p_accounts = _patched(_with_a_confident_but_wrong_looking_pair)
+    with p_transfers, p_accounts:
+        at = _open()
+        at.run()
+        assert at.button(key="reject_pair_40") is not None
+        with patch("frontend.api_client.reject_transfer_match") as mock_reject:
+            at.button(key="reject_pair_40").click().run()
+
+    assert not at.exception
+    mock_reject.assert_called_once_with(9)
+
+
+def test_pairs_to_check_are_counted_and_labelled_in_the_table():
+    p_transfers, p_accounts = _patched(_with_a_confident_but_wrong_looking_pair)
+    with p_transfers, p_accounts:
+        at = _open()
+        at.run()
+    assert [m.label for m in at.metric] == ["Paired transfers", "Pairs to check", "Lone transfers"]
+    assert [m.value for m in at.metric] == ["3", "2", "1"]
+    assert "Check" in list(at.dataframe[0].value["Confidence"])[0]

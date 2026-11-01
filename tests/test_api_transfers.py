@@ -105,3 +105,57 @@ def test_accounts_lists_every_account_by_id_and_name(env):
     client, _, ids = env
     body = client.get("/accounts").json()
     assert {(a["id"], a["name"]) for a in body} == {(ids["jc"], "JC"), (ids["ac"], "AC"), (ids["cc"], "CC")}
+
+
+def _add_pair(Session, ids, tier, confidence, out_desc, in_desc, out_type="TRANSFER DEBIT", in_type="TRANSFER CREDIT"):
+    with Session() as s:
+        group = TransferGroup(detection_tier=tier, confidence=confidence)
+        s.add(group)
+        s.flush()
+        s.add(Transaction(account_id=ids["jc"], date=date(2026, 9, 1), amount=-50.0, raw_description=out_desc,
+                          type="Transfer", transfer_group_id=group.id, raw_transaction_type=out_type))
+        s.add(Transaction(account_id=ids["ac"], date=date(2026, 9, 1), amount=50.0, raw_description=in_desc,
+                          type="Transfer", transfer_group_id=group.id, raw_transaction_type=in_type))
+        s.commit()
+        return group.id
+
+
+def _check_flags(client):
+    return {p["group_id"]: p["needs_check"] for p in client.get("/transfers").json()["pairs"]}
+
+
+def test_a_tier2_pair_whose_two_sides_share_no_wording_needs_checking(env):
+    client, Session, ids = env
+    wrong = _add_pair(Session, ids, 2, 1.0, "P0005826535 OXFAM AUSTRALIA Anila Ma", "MR AMARNANDAN PERIYA gift from a friend")
+    assert _check_flags(client)[wrong] is True
+
+
+def test_a_tier2_pair_with_the_same_wording_on_both_sides_does_not(env):
+    client, Session, ids = env
+    fine = _add_pair(Session, ids, 2, 1.0, "INTERNET TRANSFER Trans salary Anila", "INTERNET TRANSFER Trans salary Anila")
+    jc_to_ac = _add_pair(Session, ids, 2, 1.0, "ROHAN MAYEKAR L6497124807 AC to RC", "MRS ANILA ROHAN MAYEAC to RC AC to R")
+    flags = _check_flags(client)
+    assert flags[fine] is False and flags[jc_to_ac] is False
+
+
+def test_a_card_payment_pair_never_needs_checking_whatever_the_wording(env):
+    client, Session, ids = env
+    card = _add_pair(Session, ids, 2, 1.0, "4530307001277128 NAB CARD AUTOPAY MRS ANILA", "DIRECT DEBIT PAYMENT",
+                     out_type="AUTOMATIC DRAWING", in_type="CREDIT CARD PAYMENT")
+    assert _check_flags(client)[card] is False
+
+
+def test_tier1_pairs_never_need_checking_and_tentative_pairs_always_do(env):
+    client, _, ids = env
+    flags = _check_flags(client)
+    assert flags[ids["g1"]] is False     # Tier 1: matched on a reference or account number
+    assert flags[ids["g2"]] is True      # Tier 2 at 60%: matched on amount and date alone
+
+
+def test_a_monthly_direct_debit_is_not_mistaken_for_a_card_payment(env):
+    # Oxfam is drawn monthly as an AUTOMATIC DRAWING, the same bank type as a card autopay. Only a
+    # pair that includes the card's own CREDIT CARD PAYMENT leg is a card payment.
+    client, Session, ids = env
+    wrong = _add_pair(Session, ids, 2, 1.0, "P0005826535 OXFAM AUSTRALIA Anila Mayekar",
+                      "MR AMARNANDAN PERIYAavdesh gift - amar", out_type="AUTOMATIC DRAWING", in_type="TRANSFER CREDIT")
+    assert _check_flags(client)[wrong] is True

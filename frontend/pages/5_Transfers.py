@@ -12,8 +12,9 @@ st.set_page_config(page_title="Transfers", layout="wide")
 st.title("Transfers")
 st.caption(
     "Money moving between your own accounts. Transfers are left out of income and spending, so "
-    "this is the one place to check them. A pair is Confident when an account number or reference "
-    "links it, Tentative when it was matched on amount and date alone."
+    "this is the one place to check them. A transfer is an exact-amount move between your own accounts. "
+    "A pair is Confident when an account number or reference links it; the rest were matched on the "
+    "exact amount and date alone, and are marked Check when the two sides share no wording."
 )
 
 ALL_TIME = "All time"
@@ -62,26 +63,29 @@ def _is_tentative(pair: dict) -> bool:
 
 
 def _confidence_label(pair: dict) -> str:
-    return f"Tentative ({round(pair['confidence'] * 100)}%)" if _is_tentative(pair) else "Confident"
+    if _is_tentative(pair):
+        return f"Check: tentative ({round(pair['confidence'] * 100)}%)"
+    return "Check: no shared wording" if pair.get("needs_check") else "Confident"
 
 
-tentative_pairs = [p for p in pairs if _is_tentative(p)]
+# A group with more than two legs is never right, whatever the matcher thought of it.
+to_check = [p for p in pairs if p.get("needs_check") or len(p["legs"]) > 2]
 multi_leg_pairs = [p for p in pairs if len(p["legs"]) > 2]
 if multi_leg_pairs:
     st.warning(
         f"{len(multi_leg_pairs)} group(s) have more than two legs. A move between two accounts has two, so "
         "an extra row (a shop purchase, a salary credit) has probably been attached to a real pair and is "
         "missing from your income or spending. They are marked in the table below and all their legs are "
-        "listed under Check tentative pairs."
+        "listed under Check these pairs."
     )
 col1, col2, col3 = st.columns(3)
 col1.metric("Paired transfers", len(pairs))
-col2.metric("Tentative pairs", len(tentative_pairs))
+col2.metric("Pairs to check", len(to_check))
 col3.metric("Lone transfers", len(lone))
 
 st.subheader("Paired transfers")
-tentative_only = st.toggle("Tentative pairs only", key="transfers_tentative_only")
-shown = tentative_pairs if tentative_only else pairs
+check_only = st.toggle("Pairs to check only", key="transfers_check_only")
+shown = to_check if check_only else pairs
 if shown:
     st.dataframe(
         pd.DataFrame(
@@ -100,13 +104,13 @@ if shown:
 else:
     st.caption("No pairs to show.")
 
-if tentative_pairs:
-    st.subheader("Check tentative pairs")
+if to_check:
+    st.subheader("Check these pairs")
     st.caption(
-        "These were matched on amount and date alone, so some are wrong (for example a transfer "
-        "paired with a shop purchase). Unlinking a wrong pair puts both rows back into your totals."
+        "These were matched on the exact amount and date alone and look doubtful (a transfer paired "
+        "with an unrelated payment, for example). Unlinking a wrong pair puts both rows back into your totals."
     )
-    for pair in tentative_pairs:
+    for pair in to_check:
         out_leg, in_leg = pair["legs"][0], pair["legs"][-1]
         text_col, button_col = st.columns([5, 1])
         legs_text = "  ↔  ".join(

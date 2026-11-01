@@ -11,14 +11,16 @@ match an alias, so they're never candidates in the first place, not excluded by 
 denylist.
 
 Tier 2 (heuristic pairing, J5, docs/design-logic-and-ux.md §2.3): when Tier 1 finds nothing, falls
-back to amount/date/sign coincidence alone across two of the user's own (already-registered)
-accounts — no alias or reference-number text needed, since §2.1's candidate-pool restriction is
-already satisfied by every Transaction being FK'd to a real Account. Three confidence bands:
-  - High (exact amount, same day): auto-tagged Transfer, no review.
-  - Medium (exact amount within the date window, or near-equal amount same day): auto-tagged
-    Transfer, but flagged needs_review as a non-blocking soft confirmation.
-  - Low (near-equal amount, within the date window only): NOT auto-tagged — flagged needs_review
-    with the match left for the user to confirm/reject (J5's review queue).
+back to the same amount on another of the user's accounts within a couple of business days. The amount
+must match exactly (Rohan, 2026-11-01: a transfer between his own accounts matches to the cent; a
+near-equal amount is a coincidence) and neither row may be of a bank type that is never a transfer
+(a card purchase, fee, ATM withdrawal, ...). Two confidence bands:
+  - High (same day): auto-tagged Transfer, no review.
+  - Medium (within the window): auto-tagged Transfer, but flagged needs_review as a soft confirmation.
+
+A group is always exactly two legs, and a row never joins another row's group. Tier 1 overrides a
+Tier-2 group that holds one of its rows (that group is taken apart); it never takes a row from a Tier-1
+group.
 """
 
 import re
@@ -39,8 +41,23 @@ _DATE_WINDOW = timedelta(days=3)
 # Tier 2 tunable defaults (docs/design-logic-and-ux.md §2.3/§4) — not locked, revisit with real
 # data volume.
 _TIER2_BUSINESS_DAY_WINDOW = 2
-_TIER2_AMOUNT_TOLERANCE_FLAT = 2.0
-_TIER2_AMOUNT_TOLERANCE_PCT = 0.01
+
+# Bank transaction types that can never be one leg of a move between the user's own accounts
+# (Rohan, 2026-11-01: a transfer is an exact-amount move between his own accounts). Read from the
+# real data: every genuine pair is TRANSFER DEBIT / TRANSFER CREDIT, a card payment (AUTOMATIC
+# DRAWING on the paying side, CREDIT CARD PAYMENT on the card) or an INTER-BANK CREDIT (his own
+# account at another bank); the wrong matches were purchases, fees, ATM cash, reversals, salary and
+# interest. A blank type (a statement format that gives none) is allowed.
+NON_TRANSFER_BANK_TYPES = frozenset({
+    "CREDIT CARD PURCHASE", "PURCHASE AUTHORISATION", "CREDIT CARD REFUND", "FEES", "ATM DEBIT",
+    "INTEREST PAID", "INTEREST CHARGED", "SALARY", "DIVIDEND", "REVERSAL CREDIT",
+    "MISCELLANEOUS DEBIT", "DEPOSIT",
+})
+
+
+def can_be_transfer_leg(tx: Transaction) -> bool:
+    return (tx.raw_transaction_type or "").strip().upper() not in NON_TRANSFER_BANK_TYPES
+
 
 # Income that is a deliberate, confident classification and must never be paired with another row on
 # amount/date coincidence alone: the ATO tax-refund exception (§4.2) and rent (a $653.67 rent credit
@@ -67,20 +84,34 @@ def _reference_tokens(text: str) -> list[str]:
     return _REFERENCE_TOKEN_RE.findall(text)
 
 
+def _is_available(candidate: Transaction) -> bool:
+    """
+    Free for a Tier-1 link: a live row of a transfer-capable bank type that is ungrouped or sits only
+    in a weaker (Tier-2, amount-and-date) group, which an account-number or reference match overrides.
+    A row already in a Tier-1 group is taken.
+    """
+    if candidate.superseded_by_id is not None or not can_be_transfer_leg(candidate):
+        return False
+    group = candidate.transfer_group
+    return group is None or group.detection_tier >= 2
+
+
 def _find_counterpart_via_reference_number(session: Session, tx: Transaction) -> Optional[Transaction]:
     for token in _reference_tokens(tx.raw_description):
-        candidate = (
+        candidates = (
             session.query(Transaction)
             .filter(
                 Transaction.id != tx.id,
                 Transaction.account_id != tx.account_id,
                 Transaction.raw_description.contains(token),
-                Transaction.amount == -tx.amount,  # opposite sign, same magnitude — the same transfer
+                Transaction.amount == -tx.amount,  # opposite sign, same magnitude: the same transfer
             )
-            .first()
+            .all()
         )
-        if candidate is not None:
-            return candidate
+        available = [c for c in candidates if _is_available(c)]
+        if available:
+            # Prefer a free row over one that has to be taken back from a Tier-2 pairing.
+            return min(available, key=lambda c: (c.transfer_group_id is not None, c.id))
     return None
 
 
@@ -96,60 +127,74 @@ def _find_counterpart_via_alias(session: Session, tx: Transaction) -> Optional[T
         .filter(
             Transaction.id != tx.id,
             Transaction.account_id == other_account_id,
-            # Opposite sign AND same magnitude — Tier-1 is meant to be deterministic; two
-            # different-amount transactions between the same accounts within the window must not
-            # be linked just because a counterpart account was named (amount fuzziness is Tier-2's
-            # job, increment 4).
+            # Opposite sign AND exactly the same amount: transfers match to the cent.
             Transaction.amount == -tx.amount,
             Transaction.date >= window_start,
             Transaction.date <= window_end,
         )
         .all()
     )
-    if not candidates:
+    available = [c for c in candidates if _is_available(c)]
+    if not available:
         return None
-    # When more than one candidate matches (e.g. two genuinely separate transfers of the same
-    # amount between the same two accounts, a few days apart), the closest date is almost always
-    # the true pair — picking an arbitrary one (e.g. always the earliest) risks merging two
-    # unrelated transfers into one group and leaving the other pair permanently unlinked. Two
-    # candidates equally close (the same date) is a genuine ambiguity Tier-1 can't resolve safely;
-    # that residual case belongs to Tier-2's confidence scoring and review queue (increment 4/J5).
-    return min(candidates, key=lambda c: abs((c.date - tx.date).days))
+    # When more than one candidate matches (two genuinely separate transfers of the same amount
+    # between the same two accounts, a few days apart) the closest date is almost always the true
+    # pair; a free row beats one that would have to be taken back from a Tier-2 pairing.
+    return min(available, key=lambda c: (c.transfer_group_id is not None, abs((c.date - tx.date).days), c.id))
+
+
+def _dissolve_group(session: Session, group: TransferGroup, keep: tuple[Transaction, ...]) -> None:
+    """
+    Take a weaker (Tier-2) group apart because a stronger match claimed one of its rows. Every other
+    member goes back to an ordinary Income/Expense row (it was only ever paired on amount and date).
+    """
+    for member in list(group.members):
+        member.transfer_group = None
+        if member not in keep:
+            member.type = "Income" if member.amount > 0 else "Expense"
+            if member.needs_review_reason == TRANSFER_MATCH:
+                member.needs_review = False
+                member.needs_review_reason = None
+    session.flush()
+    session.delete(group)
+    session.flush()
 
 
 def link_transfer_pair(
     session: Session, tx: Transaction, counterpart: Transaction, tier: int, confidence: float = 1.0
-) -> None:
+) -> bool:
     """
-    Links two transactions as a Transfer, reusing (or creating) a TransferGroup and setting
-    `type=Transfer` on both. Public — also used directly by backend/api.py's manual
-    confirm_transfer_with_id action (/code-review finding: that handler used to hand-roll this
-    same logic, risking silent drift from this module's own group-reuse behaviour).
+    Links two transactions as a Transfer: one TransferGroup of exactly two legs, both typed
+    `type=Transfer`. A row never joins somebody else's group (that is how a shop purchase ended up
+    attached to a real transfer): if either row already sits in a group that is as strong or stronger
+    than this link (`detection_tier` <= `tier`), nothing is linked and False is returned. A Tier-1 link
+    (account number or reference) overrides a Tier-2 group (amount and date only): that group is taken
+    apart and its other rows go back to ordinary income/expense.
 
-    Also clears a pre-existing needs_review flag that this link makes moot — reported live by
-    Rohan on the real AC/JC "Trans salary" pair, whose upload-time llm_unavailable flag (set by
-    categorisation, which runs before transfer detection in the upload pipeline) survived a
-    confident Tier-1 link forever, even though docs/design-logic-and-ux.md §2.3 says a confident
-    match "auto-links with no review" and category/refund status stop mattering once a row is
-    genuinely a Transfer (GET /summary excludes Transfer rows outright either way).
-    unrecognised_account is never cleared here, consistent with should_supersede's use everywhere
-    else in this codebase: it's about the account's identity, not this transaction's classification.
+    Public: also used by backend/api.py's manual confirm_transfer_with_id action.
 
-    CORRECTNESS NOTE (/code-review finding — an earlier version of this docstring wrongly claimed
-    Tier-2 Medium never reaches this function): `_process_tier2`'s Medium band *does* call this
-    function too, immediately followed by `_flag_transfer_match(..., type_changed=True)`, which
-    re-flags `needs_review=True`/`reason=TRANSFER_MATCH` right back — so a Medium match's final
-    state is still correctly flagged for its soft confirmation, but only because that second call
-    always runs straight after this one. This function does not itself know a Medium-band caller
-    is about to re-flag it. Do not reorder or separate those two calls in `_process_tier2` without
-    re-verifying this — doing so would silently leave a Medium match unflagged, invisible to the
-    Needs-Review queue, violating design-logic-and-ux.md §2.3.
+    Also clears a pre-existing needs_review flag that this link makes moot (docs/design-logic-and-ux.md
+    §2.3: a confident match "auto-links with no review"). unrecognised_account is never cleared: it is
+    about the account's identity, not this transaction's classification. A Tier-1 link also clears the
+    old category, which means nothing on a final Transfer; a Tier-2 link keeps it, because a stronger
+    match (or a rejection) can still send the row back to being income or spending.
+
+    Medium-band note: `_process_tier2` calls `_flag_transfer_match(..., type_changed=True)` straight
+    after this, which re-flags `needs_review`/`TRANSFER_MATCH`; do not separate those two calls.
     """
-    group = counterpart.transfer_group or tx.transfer_group
-    if group is None:
-        group = TransferGroup(detection_tier=tier, confidence=confidence)
-        session.add(group)
-        session.flush()
+    if tx.transfer_group_id is not None and tx.transfer_group_id == counterpart.transfer_group_id:
+        return True
+    for member in (tx, counterpart):
+        group = member.transfer_group
+        if group is None:
+            continue
+        if group.detection_tier <= tier:
+            return False
+        _dissolve_group(session, group, keep=(tx, counterpart))
+
+    group = TransferGroup(detection_tier=tier, confidence=confidence)
+    session.add(group)
+    session.flush()
 
     tx.transfer_group = group
     counterpart.transfer_group = group
@@ -157,9 +202,7 @@ def link_transfer_pair(
     counterpart.type = "Transfer"
 
     for member in (tx, counterpart):
-        if confidence >= 1.0:
-            # A confident link: the old category means nothing on a Transfer. A tentative (Medium)
-            # link keeps it, because rejecting the match restores the row to Income/Expense.
+        if tier == 1:
             member.category = None
             member.subcategory = None
         if member.needs_review_reason is None or should_supersede(member.needs_review_reason, TRANSFER_MATCH):
@@ -167,6 +210,7 @@ def link_transfer_pair(
             member.needs_review_reason = None
 
     session.commit()
+    return True
 
 
 def _add_business_days(d: date_type, n: int) -> date_type:
@@ -183,21 +227,9 @@ def _amounts_exact_opposite(a: float, b: float) -> bool:
     return a == -b
 
 
-def _amounts_near_equal_opposite(a: float, b: float) -> bool:
-    """Opposite sign, magnitude within tolerance (<=$2 or 1%, whichever is larger) — §2.3."""
-    if (a < 0) == (b < 0):  # must be opposite sign; same-sign is never a transfer leg
-        return False
-    tolerance = max(_TIER2_AMOUNT_TOLERANCE_FLAT, _TIER2_AMOUNT_TOLERANCE_PCT * max(abs(a), abs(b)))
-    return abs(abs(a) - abs(b)) <= tolerance
-
-
-def _tier2_band(tx_date: date_type, candidate_date: date_type, exact_amount: bool) -> str:
-    same_day = tx_date == candidate_date
-    if exact_amount and same_day:
-        return "high"
-    if exact_amount or same_day:  # exact-within-window, or near-equal-same-day
-        return "medium"
-    return "low"  # near-equal, within window only
+def _tier2_band(tx_date: date_type, candidate_date: date_type) -> str:
+    """Amounts always match exactly by now: same day is High, within the window is Medium."""
+    return "high" if tx_date == candidate_date else "medium"
 
 
 def _find_tier2_candidates(session: Session, tx: Transaction) -> list[tuple[Transaction, str]]:
@@ -251,20 +283,18 @@ def _find_tier2_candidates(session: Session, tx: Transaction) -> list[tuple[Tran
     )
     candidates = []
     for row in rows:
-        if not _amounts_near_equal_opposite(tx.amount, row.amount):
+        if not _amounts_exact_opposite(tx.amount, row.amount) or not can_be_transfer_leg(row):
             continue
-        exact = _amounts_exact_opposite(tx.amount, row.amount)
-        band = _tier2_band(tx.date, row.date, exact)
-        candidates.append((row, band))
+        candidates.append((row, _tier2_band(tx.date, row.date)))
     return candidates
 
 
-_BAND_RANK = {"high": 2, "medium": 1, "low": 0}
+_BAND_RANK = {"high": 2, "medium": 1}
 
 
-def _tier2_score(tx: Transaction, pair: tuple[Transaction, str]) -> tuple[int, int, float]:
+def _tier2_score(tx: Transaction, pair: tuple[Transaction, str]) -> tuple[int, int]:
     candidate, band = pair
-    return (_BAND_RANK[band], -abs((candidate.date - tx.date).days), -abs(abs(candidate.amount) - abs(tx.amount)))
+    return (_BAND_RANK[band], -abs((candidate.date - tx.date).days))
 
 
 def _best_tier2_candidate(
@@ -306,7 +336,7 @@ def _flag_unresolved_tie_losers(others: list[Transaction]) -> None:
 
 
 def _process_tier2(session: Session, tx: Transaction) -> None:
-    if is_never_transfer(tx):
+    if is_never_transfer(tx) or not can_be_transfer_leg(tx):
         return
     found = _best_tier2_candidate(session, tx)
     if found is None:
@@ -317,18 +347,10 @@ def _process_tier2(session: Session, tx: Transaction) -> None:
         link_transfer_pair(session, tx, candidate, tier=2, confidence=1.0)
         return
 
-    if band == "medium":
-        link_transfer_pair(session, tx, candidate, tier=2, confidence=_TIER2_MEDIUM_CONFIDENCE)
+    if link_transfer_pair(session, tx, candidate, tier=2, confidence=_TIER2_MEDIUM_CONFIDENCE):
         _flag_transfer_match(tx, candidate, type_changed=True)
         _flag_unresolved_tie_losers(other_tied)
         session.commit()
-        return
-
-    # Low confidence: not auto-tagged — surfaced in the review queue (J5) for the user to
-    # confirm/reject rather than guessed at (docs/design-logic-and-ux.md §2.3).
-    _flag_transfer_match(tx, candidate, type_changed=False)
-    _flag_unresolved_tie_losers(other_tied)
-    session.commit()
 
 
 def _flag_transfer_match(tx: Transaction, candidate: Transaction, *, type_changed: bool) -> None:
@@ -357,30 +379,40 @@ def _flag_transfer_match(tx: Transaction, candidate: Transaction, *, type_change
             member.needs_review_reason = TRANSFER_MATCH
 
 
-def process_transfer_detection(session: Session, tx: Transaction) -> None:
+def process_transfer_detection(session: Session, tx: Transaction, tiers: tuple[int, ...] = (1, 2)) -> None:
     """
-    Run transfer detection for one transaction: Tier 1 (signal-based) first, falling back to
-    Tier 2 (heuristic pairing, J5) only when Tier 1 finds nothing. Leaves the transaction's `type`
-    untouched (whatever categorisation already assigned) when neither tier finds a match.
+    Run transfer detection for one transaction: Tier 1 (account number or shared reference) first,
+    then Tier 2 (the same exact amount on another account within a couple of business days). `tiers`
+    lets a caller run the passes separately over a whole batch (all of Tier 1, then all of Tier 2) so
+    the order the rows arrive in cannot let an amount-only match take a row from a reference match.
+    Leaves `type` untouched when neither tier finds a match, and never touches a row whose bank type
+    says it is a purchase, fee, cash withdrawal and so on.
     """
     if tx.type == "Transfer":
         return  # already linked
-
-    counterpart = _find_counterpart_via_reference_number(session, tx)
-    if counterpart is None:
-        counterpart = _find_counterpart_via_alias(session, tx)
-    if counterpart is not None:
-        link_transfer_pair(session, tx, counterpart, tier=1)
+    if not can_be_transfer_leg(tx):
         return
 
-    _process_tier2(session, tx)
+    if 1 in tiers:
+        counterpart = _find_counterpart_via_reference_number(session, tx)
+        if counterpart is None:
+            counterpart = _find_counterpart_via_alias(session, tx)
+        if counterpart is not None and link_transfer_pair(session, tx, counterpart, tier=1):
+            return
+
+    if 2 in tiers:
+        _process_tier2(session, tx)
 
 
 def find_suggested_transfer_match(session: Session, tx: Transaction) -> Optional[Transaction]:
     """
-    Recompute the current best Tier-2 candidate for a transaction flagged needs_review with
-    reason=transfer_match but not yet linked (the Low-confidence case, §2.3) — used by the J5
+    Recompute the current best Tier-2 candidate (same exact amount, opposite sign, another account)
+    for a transaction flagged needs_review with reason=transfer_match but not yet linked, for the
     review-queue API to show a suggested counterpart without persisting an unconfirmed link.
     """
+    if not can_be_transfer_leg(tx):
+        return None
     found = _best_tier2_candidate(session, tx)
     return found[0] if found else None
+
+

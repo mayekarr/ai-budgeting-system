@@ -341,43 +341,36 @@ def test_tier2_exact_amount_within_window_auto_links_medium_confidence_flagged(s
     assert tx_b.needs_review is True
 
 
-def test_tier2_near_equal_amount_same_day_auto_links_medium_confidence_flagged(session):
+def test_tier2_never_links_amounts_that_are_only_near_equal(session):
+    # Rohan, 2026-11-01: a transfer between his own accounts matches to the cent. A $1.50 difference
+    # is a coincidence (a shop purchase against a transfer), never a tolerance match.
     a = _account(session, "A")
     b = _account(session, "B")
     tx_a = _tx(session, a, date(2026, 8, 5), -100.00, "Unlabelled transfer out")
-    tx_b = _tx(session, b, date(2026, 8, 5), 101.50, "Unlabelled transfer in")  # within $2 tolerance
+    tx_b = _tx(session, b, date(2026, 8, 5), 101.50, "Unlabelled transfer in")
 
     process_transfer_detection(session, tx_a)
     process_transfer_detection(session, tx_b)
 
     session.refresh(tx_a)
     session.refresh(tx_b)
-    assert tx_a.type == "Transfer"
-    assert tx_a.transfer_group_id == tx_b.transfer_group_id
-    assert tx_a.needs_review is True
-    assert tx_a.needs_review_reason == TRANSFER_MATCH
+    assert tx_a.transfer_group_id is None and tx_b.transfer_group_id is None
+    assert tx_a.type != "Transfer" and tx_a.needs_review is False and tx_b.needs_review is False
 
 
-def test_tier2_near_equal_amount_within_window_only_flags_without_auto_tagging(session):
+def test_tier2_near_equal_amount_within_the_window_is_not_even_flagged(session):
     a = _account(session, "A")
     b = _account(session, "B")
     tx_a = _tx(session, a, date(2026, 8, 5), -100.00, "Unlabelled transfer out")
-    tx_b = _tx(session, b, date(2026, 8, 7), 101.50, "Unlabelled transfer in")  # near-equal AND in-window only
-    tx_a.type, tx_b.type = "Expense", "Income"  # what categorisation would already have assigned
-    session.commit()
+    tx_b = _tx(session, b, date(2026, 8, 7), 101.50, "Unlabelled transfer in")
 
     process_transfer_detection(session, tx_a)
     process_transfer_detection(session, tx_b)
 
     session.refresh(tx_a)
     session.refresh(tx_b)
-    # Low confidence: not auto-tagged — stays whatever it already was, just flagged for review.
-    assert tx_a.type == "Expense"
-    assert tx_a.transfer_group_id is None
-    assert tx_a.needs_review is True
-    assert tx_a.needs_review_reason == TRANSFER_MATCH
-    assert tx_b.type == "Income"
-    assert tx_b.needs_review is True
+    assert tx_a.transfer_group_id is None and tx_a.needs_review is False
+    assert tx_b.transfer_group_id is None and tx_b.needs_review is False
 
 
 def test_tier2_outside_date_window_does_not_match(session):
@@ -491,9 +484,8 @@ def test_tier2_does_not_overwrite_an_existing_unrelated_needs_review_reason(sess
     tx_a = _tx(session, a, date(2026, 8, 5), -100.00, "Unlabelled transfer out")
     tx_a.needs_review = True
     tx_a.needs_review_reason = UNRECOGNISED_ACCOUNT
-    # Near-equal (not exact) amount, same day -> Medium band, which is where needs_review_reason
-    # gets (re)assigned.
-    tx_b = _tx(session, b, date(2026, 8, 5), 101.50, "Unlabelled transfer in")
+    # Exact amount, a day later -> Medium band, which is where needs_review_reason gets (re)assigned.
+    tx_b = _tx(session, b, date(2026, 8, 6), 100.00, "Unlabelled transfer in")
     session.commit()
 
     process_transfer_detection(session, tx_a)
@@ -521,7 +513,7 @@ def test_tier2_medium_band_supersedes_a_moot_low_confidence_category_reason(sess
     tx_a = _tx(session, a, date(2026, 8, 5), -100.00, "Unlabelled transfer out")
     tx_a.needs_review = True
     tx_a.needs_review_reason = LOW_CONFIDENCE_CATEGORY
-    tx_b = _tx(session, b, date(2026, 8, 5), 101.50, "Unlabelled transfer in")  # near-equal, same day -> Medium
+    tx_b = _tx(session, b, date(2026, 8, 6), 100.00, "Unlabelled transfer in")  # exact, a day later -> Medium
     session.commit()
 
     process_transfer_detection(session, tx_a)
@@ -530,28 +522,6 @@ def test_tier2_medium_band_supersedes_a_moot_low_confidence_category_reason(sess
     session.refresh(tx_a)
     assert tx_a.type == "Transfer"
     assert tx_a.needs_review_reason == TRANSFER_MATCH
-
-
-def test_tier2_low_band_preserves_a_still_live_low_confidence_category_reason(session):
-    # Contrast with the Medium case above: a Low-band match does NOT change `type` (it's only a
-    # suggestion), so the category is still exactly as live/uncertain as before — the reason must
-    # stay put, not be superseded.
-    a = _account(session, "A")
-    b = _account(session, "B")
-    tx_a = _tx(session, a, date(2026, 8, 5), -100.00, "Unlabelled transfer out")
-    tx_a.type = "Expense"
-    tx_a.needs_review = True
-    tx_a.needs_review_reason = LOW_CONFIDENCE_CATEGORY
-    # near-equal amount, within window but not same day -> Low band
-    tx_b = _tx(session, b, date(2026, 8, 7), 101.50, "Unlabelled transfer in")
-    session.commit()
-
-    process_transfer_detection(session, tx_a)
-    process_transfer_detection(session, tx_b)
-
-    session.refresh(tx_a)
-    assert tx_a.type == "Expense"  # not auto-tagged
-    assert tx_a.needs_review_reason == LOW_CONFIDENCE_CATEGORY
 
 
 def test_tier2_genuine_high_band_tie_is_downgraded_to_medium_not_silently_auto_linked(session):
@@ -606,14 +576,14 @@ def test_tier2_never_pairs_with_an_already_classified_groupless_transfer(session
     assert loan_movement.transfer_group_id is None
 
 
-def test_tier2_never_pairs_a_rental_income_credit_with_a_near_equal_debit(session):
+def test_tier2_never_pairs_a_rental_income_credit_with_an_exact_debit(session):
     # Real case: a $653.67 rent credit was heuristically paired with a -$651.03 Medibank debit on
     # another account. Rent is a deliberate, confident classification (like an ATO refund).
     jc = _account(session, "JC")
     cc = _account(session, "CC")
     rent = _tx(session, jc, date(2025, 7, 14), 653.67, "6 Jericho Ct Berwi P & G Real Estat")
     rent.type, rent.category, rent.subcategory = "Income", "Income", "Rental Income"
-    debit = _tx(session, cc, date(2025, 7, 14), -651.03, "MEDIBANK PHI DEBIT MELBOURNE")
+    debit = _tx(session, cc, date(2025, 7, 14), -653.67, "MEDIBANK PHI DEBIT MELBOURNE")
     session.commit()
 
     process_transfer_detection(session, rent)   # rent as the row being searched on
@@ -625,27 +595,27 @@ def test_tier2_never_pairs_a_rental_income_credit_with_a_near_equal_debit(sessio
     assert rent.type == "Income" and debit.type == "Expense"
 
 
-def test_confident_link_clears_the_stale_category_but_a_medium_link_keeps_it(session):
-    jc = _account(session, "JC")
-    cc = _account(session, "CC")
-    a = _tx(session, jc, date(2026, 8, 5), -8050.20, "NAB CARD AUTOPAY")
-    b = _tx(session, cc, date(2026, 8, 5), 8050.20, "DIRECT DEBIT PAYMENT")
-    for tx in (a, b):
-        tx.category = "Miscellaneous"
-    c = _tx(session, jc, date(2026, 8, 10), -100.00, "SOMETHING")
-    d = _tx(session, cc, date(2026, 8, 11), 100.00, "SOMETHING ELSE")
-    for tx in (c, d):
+def test_only_a_tier1_link_clears_the_stale_category(session):
+    # A Tier-1 link (account number / reference) is final, so the old category means nothing.
+    # A Tier-2 link (amount and date only) can still be dissolved by a stronger match, so the row
+    # keeps its category in case it has to go back to being an ordinary income/expense.
+    ac = _account_with_alias(session, "AC", "147912186")
+    jc = _account_with_alias(session, "JC", "147912573")
+    a = _tx(session, ac, date(2026, 8, 5), -300.00, "ONLINE Q7777777777 JC to AC", "TRANSFER DEBIT")
+    b = _tx(session, jc, date(2026, 8, 5), 300.00, "ONLINE Q7777777777 JC to AC", "TRANSFER CREDIT")
+    x = _tx(session, ac, date(2026, 8, 6), -100.00, "SOMETHING", "TRANSFER DEBIT")
+    y = _tx(session, jc, date(2026, 8, 6), 100.00, "SOMETHING ELSE", "TRANSFER CREDIT")
+    for tx in (a, b, x, y):
         tx.category = "Shopping"
     session.commit()
 
     process_transfer_detection(session, a)
-    process_transfer_detection(session, c)
+    process_transfer_detection(session, x)
 
-    for tx in (a, b, c, d):
+    for tx in (a, b, x, y):
         session.refresh(tx)
     assert a.type == b.type == "Transfer" and a.category is None and b.category is None
-    # exact amount but a day apart = Medium: tentative, so the category must survive a rejection
-    assert c.type == d.type == "Transfer" and c.category == "Shopping"
+    assert x.type == y.type == "Transfer" and x.category == "Shopping"
 
 
 @pytest.mark.parametrize("category, subcategory, expected", [
@@ -680,3 +650,113 @@ def test_tier2_never_pairs_a_loan_drawdown_with_a_near_equal_debit(session):
     session.refresh(drawdown)
     session.refresh(other)
     assert drawdown.transfer_group_id is None and other.transfer_group_id is None
+
+
+# --- 2026-11-01: exact amounts, bank-type gate, strict two-leg groups, Tier 1 beats Tier 2 --------
+
+NON_TRANSFER_BANK_TYPES = [
+    "CREDIT CARD PURCHASE", "PURCHASE AUTHORISATION", "CREDIT CARD REFUND", "FEES", "ATM DEBIT",
+    "INTEREST PAID", "INTEREST CHARGED", "SALARY", "DIVIDEND", "REVERSAL CREDIT", "MISCELLANEOUS DEBIT",
+    "DEPOSIT",
+]
+
+
+@pytest.mark.parametrize("bank_type", NON_TRANSFER_BANK_TYPES)
+def test_a_row_the_bank_types_as_a_purchase_fee_or_cash_is_never_a_transfer_leg(session, bank_type):
+    a = _account(session, "A")
+    b = _account(session, "B")
+    odd = _tx(session, a, date(2026, 8, 5), -30.00, "SOMETHING", bank_type)
+    partner = _tx(session, b, date(2026, 8, 5), 30.00, "SOMETHING ELSE", "TRANSFER CREDIT")
+
+    process_transfer_detection(session, odd)
+    process_transfer_detection(session, partner)
+
+    session.refresh(odd)
+    session.refresh(partner)
+    assert odd.transfer_group_id is None and partner.transfer_group_id is None
+
+
+@pytest.mark.parametrize("credit_type", ["", "TRANSFER CREDIT", "CREDIT CARD PAYMENT", "INTER-BANK CREDIT"])
+def test_rows_with_a_transfer_capable_bank_type_still_pair_on_an_exact_amount(session, credit_type):
+    # INTER-BANK CREDIT is allowed: money arriving from the user's own account at another bank
+    # (e.g. NBA) is typed that way on the NAB side.
+    a = _account(session, "A")
+    b = _account(session, "B")
+    out = _tx(session, a, date(2026, 8, 5), -30.00, "SOMETHING", "TRANSFER DEBIT")
+    incoming = _tx(session, b, date(2026, 8, 5), 30.00, "SOMETHING ELSE", credit_type)
+
+    process_transfer_detection(session, out)
+    process_transfer_detection(session, incoming)
+
+    session.refresh(out)
+    session.refresh(incoming)
+    assert out.transfer_group_id is not None and out.transfer_group_id == incoming.transfer_group_id
+
+
+def _intruder_scenario(session):
+    """AC +30 and JC -30 are one real transfer (shared reference); RC -30 is an unrelated debit of the
+    same amount that, processed first, grabs AC +30 on amount and date alone."""
+    rc = _account(session, "RC")
+    ac = _account(session, "AC")
+    jc = _account(session, "JC")
+    intruder = _tx(session, rc, date(2026, 3, 3), -30.00, "COFFEE CLUB", "TRANSFER DEBIT")
+    credit = _tx(session, ac, date(2026, 3, 3), 30.00, "ONLINE G1459687961 JC to AC MAYEKAR A", "TRANSFER CREDIT")
+    debit = _tx(session, jc, date(2026, 3, 3), -30.00, "ONLINE G1459687961 JC to AC MAYEKAR A", "TRANSFER DEBIT")
+    return intruder, credit, debit
+
+
+def test_a_reference_match_overrides_a_weaker_amount_only_pairing(session):
+    intruder, credit, debit = _intruder_scenario(session)
+
+    process_transfer_detection(session, intruder)   # Tier 2 pairs it with AC +30 first
+    session.refresh(credit)
+    assert credit.transfer_group_id == intruder.transfer_group_id is not None
+
+    process_transfer_detection(session, debit)      # the shared reference now takes AC +30 back
+
+    for tx in (intruder, credit, debit):
+        session.refresh(tx)
+    assert credit.transfer_group_id == debit.transfer_group_id is not None
+    assert intruder.transfer_group_id is None and intruder.type == "Expense"
+    assert session.get(TransferGroup, credit.transfer_group_id).detection_tier == 1
+
+
+def test_a_group_never_has_more_than_two_legs(session):
+    intruder, credit, debit = _intruder_scenario(session)
+    for tx in (intruder, credit, debit):
+        process_transfer_detection(session, tx)
+    members = session.query(Transaction).filter(Transaction.transfer_group_id.isnot(None)).all()
+    assert len(members) == 2 and {m.id for m in members} == {credit.id, debit.id}
+
+
+def test_a_reference_match_never_takes_a_row_from_a_confident_group(session):
+    rc = _account(session, "RC")
+    ac = _account(session, "AC")
+    jc = _account(session, "JC")
+    credit = _tx(session, ac, date(2026, 3, 3), 30.00, "ONLINE G1459687961 JC to AC", "TRANSFER CREDIT")
+    debit = _tx(session, jc, date(2026, 3, 3), -30.00, "ONLINE G1459687961 JC to AC", "TRANSFER DEBIT")
+    process_transfer_detection(session, debit)
+    group_id = debit.transfer_group_id
+    other = _tx(session, rc, date(2026, 3, 3), -30.00, "ONLINE G1459687961 reused reference", "TRANSFER DEBIT")
+
+    process_transfer_detection(session, other)
+
+    for tx in (credit, debit, other):
+        session.refresh(tx)
+    assert credit.transfer_group_id == debit.transfer_group_id == group_id
+    assert other.transfer_group_id is None
+
+
+def test_tiers_can_be_run_as_separate_passes_so_row_order_cannot_decide_the_outcome(session):
+    intruder, credit, debit = _intruder_scenario(session)
+    rows = [intruder, credit, debit]       # the intruder happens to come first
+
+    for tx in rows:
+        process_transfer_detection(session, tx, tiers=(1,))
+    for tx in rows:
+        process_transfer_detection(session, tx, tiers=(2,))
+
+    for tx in rows:
+        session.refresh(tx)
+    assert credit.transfer_group_id == debit.transfer_group_id is not None
+    assert intruder.transfer_group_id is None

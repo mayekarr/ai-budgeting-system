@@ -1,0 +1,120 @@
+from __future__ import annotations
+
+from datetime import date
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+
+from backend.models import Account, Base, CategorisationRule, Transaction, TransferGroup
+from transfers.repair import rebuild_transfer_groups
+
+
+@pytest.fixture()
+def session():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(bind=engine)
+    with Session(engine) as s:
+        s.add_all([Account(name="JC"), Account(name="AC"), Account(name="CC")])
+        s.commit()
+        yield s
+
+
+def _acct(session, name):
+    return session.query(Account).filter_by(name=name).one()
+
+
+def _tx(session, account, d, amount, desc, bank_type, group=None, **kw):
+    tx = Transaction(account_id=account.id, date=d, amount=amount, raw_description=desc,
+                     raw_transaction_type=bank_type, type="Transfer" if group else kw.pop("type", "Expense"),
+                     transfer_group=group, category=kw.pop("category", None), **kw)
+    session.add(tx)
+    session.flush()
+    return tx
+
+
+def _group(session, tier, confidence):
+    g = TransferGroup(detection_tier=tier, confidence=confidence)
+    session.add(g)
+    session.flush()
+    return g
+
+
+@pytest.fixture()
+def world(session):
+    jc, ac, cc = _acct(session, "JC"), _acct(session, "AC"), _acct(session, "CC")
+    d = date(2026, 3, 3)
+    # 1. a confident Tier-1 pair: must be left exactly as it is
+    g1 = _group(session, 1, 1.0)
+    keep_a = _tx(session, jc, d, -500.0, "ONLINE Q1111111111 JC to AC", "TRANSFER DEBIT", g1)
+    keep_b = _tx(session, ac, d, 500.0, "ONLINE Q1111111111 JC to AC", "TRANSFER CREDIT", g1)
+    # 2. a real transfer with a card purchase wrongly attached (3 legs, Tier 2)
+    g2 = _group(session, 2, 1.0)
+    real_out = _tx(session, jc, d, -30.0, "ONLINE G1459687961 JC to AC", "TRANSFER DEBIT", g2)
+    real_in = _tx(session, ac, d, 30.0, "ONLINE G1459687961 JC to AC", "TRANSFER CREDIT", g2)
+    intruder = _tx(session, cc, d, -30.0, "Mater Lotteries Brisbane", "CREDIT CARD PURCHASE", g2)
+    # 3. a near-equal pair that the old tolerance matching produced
+    g3 = _group(session, 2, 0.6)
+    near_a = _tx(session, ac, d, -100.0, "SHOP A", "TRANSFER DEBIT", g3)
+    near_b = _tx(session, cc, d, 101.5, "SHOP B", "CREDIT CARD PAYMENT", g3)
+    # 4. a genuine exact card payment matched by amount and date (Tier 2 high): must be rebuilt as a pair
+    g4 = _group(session, 2, 1.0)
+    pay_out = _tx(session, jc, d, -8050.2, "NAB CARD AUTOPAY", "AUTOMATIC DRAWING", g4)
+    pay_in = _tx(session, cc, d, 8050.2, "DIRECT DEBIT PAYMENT", "CREDIT CARD PAYMENT", g4)
+    session.commit()
+    return dict(keep=(keep_a, keep_b), g1=g1, real=(real_out, real_in), intruder=intruder,
+                near=(near_a, near_b), pay=(pay_out, pay_in))
+
+
+def test_tier1_groups_are_left_alone(session, world):
+    rebuild_transfer_groups(session)
+    a, b = world["keep"]
+    assert a.transfer_group_id == b.transfer_group_id == world["g1"].id and a.type == "Transfer"
+
+
+def test_a_stray_row_is_freed_and_the_real_pair_is_rebuilt_on_its_reference(session, world):
+    rebuild_transfer_groups(session)
+    out, inn = world["real"]
+    intruder = world["intruder"]
+    assert out.transfer_group_id == inn.transfer_group_id is not None
+    assert session.get(TransferGroup, out.transfer_group_id).detection_tier == 1
+    assert intruder.transfer_group_id is None and intruder.type == "Expense"
+
+
+def test_near_equal_pairs_are_dissolved_and_the_rows_go_back_to_income_and_expense(session, world):
+    rebuild_transfer_groups(session)
+    a, b = world["near"]
+    assert a.transfer_group_id is None and b.transfer_group_id is None
+    assert (a.type, b.type) == ("Expense", "Income")
+    assert a.needs_review is False
+
+
+def test_a_genuine_exact_pair_is_matched_again(session, world):
+    result = rebuild_transfer_groups(session)
+    out, inn = world["pay"]
+    assert out.transfer_group_id == inn.transfer_group_id is not None and out.type == "Transfer"
+    assert result["dissolved_groups"] == 3
+
+
+def test_categories_are_restored_for_freed_rows_from_a_backup(session, world):
+    intruder = world["intruder"]
+    rebuild_transfer_groups(session, restore_categories={intruder.id: ("Gifts & Donations", "Donations")})
+    assert (intruder.category, intruder.subcategory) == ("Gifts & Donations", "Donations")
+
+
+def test_without_a_backup_a_freed_row_is_recategorised_by_the_rules_or_left_unplaced(session, world):
+    session.add(CategorisationRule(pattern="MATER LOTTERIES", match_type="substring", category="Gifts & Donations",
+                                   subcategory="Donations", priority=100, source="seeded", is_active=True))
+    session.commit()
+    rebuild_transfer_groups(session)
+    assert world["intruder"].category == "Gifts & Donations"
+    near_a, _ = world["near"]
+    assert near_a.category == "Miscellaneous"           # no rule matches: left as the unplaced default
+
+
+def test_a_second_run_changes_nothing(session, world):
+    rebuild_transfer_groups(session)
+    again = rebuild_transfer_groups(session)
+    assert again["dissolved_groups"] == 1 or again["dissolved_groups"] == 0   # only the rebuilt Tier-2 pair
+    out, inn = world["real"]
+    assert out.transfer_group_id == inn.transfer_group_id

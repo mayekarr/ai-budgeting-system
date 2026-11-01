@@ -374,7 +374,7 @@ def test_suggested_transfer_match_returns_the_best_current_candidate(client):
     api_client, SessionLocal, (a, b) = client
     tx_a_id = _seed_tx(SessionLocal, a, date=date(2026, 8, 5), amount=-100.0,
                         needs_review=True, needs_review_reason=TRANSFER_MATCH)
-    tx_b_id = _seed_tx(SessionLocal, b, date=date(2026, 8, 7), amount=101.5,
+    tx_b_id = _seed_tx(SessionLocal, b, date=date(2026, 8, 7), amount=100.0,
                         needs_review=True, needs_review_reason=TRANSFER_MATCH)
 
     body = api_client.get(f"/transactions/{tx_a_id}/suggested-transfer-match").json()
