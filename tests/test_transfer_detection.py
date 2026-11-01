@@ -604,3 +604,45 @@ def test_tier2_never_pairs_with_an_already_classified_groupless_transfer(session
     assert unrelated.type != "Transfer"
     assert unrelated.transfer_group_id is None
     assert loan_movement.transfer_group_id is None
+
+
+def test_tier2_never_pairs_a_rental_income_credit_with_a_near_equal_debit(session):
+    # Real case: a $653.67 rent credit was heuristically paired with a -$651.03 Medibank debit on
+    # another account. Rent is a deliberate, confident classification (like an ATO refund).
+    jc = _account(session, "JC")
+    cc = _account(session, "CC")
+    rent = _tx(session, jc, date(2025, 7, 14), 653.67, "6 Jericho Ct Berwi P & G Real Estat")
+    rent.type, rent.category, rent.subcategory = "Income", "Income", "Rental Income"
+    debit = _tx(session, cc, date(2025, 7, 14), -651.03, "MEDIBANK PHI DEBIT MELBOURNE")
+    session.commit()
+
+    process_transfer_detection(session, rent)   # rent as the row being searched on
+    process_transfer_detection(session, debit)  # rent as someone else's candidate
+
+    session.refresh(rent)
+    session.refresh(debit)
+    assert rent.transfer_group_id is None and debit.transfer_group_id is None
+    assert rent.type == "Income" and debit.type == "Expense"
+
+
+def test_confident_link_clears_the_stale_category_but_a_medium_link_keeps_it(session):
+    jc = _account(session, "JC")
+    cc = _account(session, "CC")
+    a = _tx(session, jc, date(2026, 8, 5), -8050.20, "NAB CARD AUTOPAY")
+    b = _tx(session, cc, date(2026, 8, 5), 8050.20, "DIRECT DEBIT PAYMENT")
+    for tx in (a, b):
+        tx.category = "Miscellaneous"
+    c = _tx(session, jc, date(2026, 8, 10), -100.00, "SOMETHING")
+    d = _tx(session, cc, date(2026, 8, 11), 100.00, "SOMETHING ELSE")
+    for tx in (c, d):
+        tx.category = "Shopping"
+    session.commit()
+
+    process_transfer_detection(session, a)
+    process_transfer_detection(session, c)
+
+    for tx in (a, b, c, d):
+        session.refresh(tx)
+    assert a.type == b.type == "Transfer" and a.category is None and b.category is None
+    # exact amount but a day apart = Medium: tentative, so the category must survive a rejection
+    assert c.type == d.type == "Transfer" and c.category == "Shopping"

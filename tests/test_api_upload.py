@@ -491,3 +491,27 @@ def test_upload_skips_zero_dollar_notice_rows_and_reports_them(client):
     assert body["zero_amount_skipped"] == 1
     assert "1" in body["message"]
     assert all(t["amount"] != 0 for t in client.get("/transactions").json())
+
+
+_UPLOAD_HEADER = "Date,Amount,Account Number,Transaction Type,Transaction Details,Balance,Category,Merchant Name,Processed On\n"
+
+
+def test_upload_types_a_lone_card_payment_credit_as_transfer(client):
+    csv = _UPLOAD_HEADER + "2026-10-06,10749.45,Card ending 2957,DIRECT CREDIT,DIRECT DEBIT PAYMENT,-6010.91,,,\n"
+    assert _upload(client, csv).status_code == 201
+    row = client.get("/transactions").json()[0]
+    assert row["type"] == "Transfer" and row["category"] is None
+    assert row["transfer_group_id"] is None
+    assert row["needs_review_reason"] in (None, "unrecognised_account")
+
+
+def test_upload_still_pairs_a_card_payment_with_its_counterpart_when_both_are_present(client):
+    csv = (
+        _UPLOAD_HEADER
+        + "2026-10-06,500.00,Card ending 2957,DIRECT CREDIT,DIRECT DEBIT PAYMENT,-100.00,,,\n"
+        + "2026-10-06,-500.00,147912573,DEBIT,NAB CARD AUTOPAY,1000.00,,,\n"
+    )
+    assert _upload(client, csv).status_code == 201
+    rows = client.get("/transactions").json()
+    assert {r["type"] for r in rows} == {"Transfer"}
+    assert len({r["transfer_group_id"] for r in rows}) == 1 and rows[0]["transfer_group_id"] is not None

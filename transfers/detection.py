@@ -41,6 +41,11 @@ _TIER2_BUSINESS_DAY_WINDOW = 2
 _TIER2_AMOUNT_TOLERANCE_FLAT = 2.0
 _TIER2_AMOUNT_TOLERANCE_PCT = 0.01
 
+# Income that is a deliberate, confident classification and must never be paired with another row on
+# amount/date coincidence alone: the ATO tax-refund exception (§4.2) and rent (a $653.67 rent credit
+# was once paired with a -$651.03 Medibank debit).
+_NEVER_HEURISTIC_SUBCATEGORIES = ("Tax Refund", "Rental Income")
+
 
 def _find_account_via_alias_in_text(session: Session, text: str, exclude_account_id: int) -> Optional[int]:
     aliases = session.query(AccountAlias).filter(AccountAlias.account_id != exclude_account_id).all()
@@ -144,6 +149,11 @@ def link_transfer_pair(
     counterpart.type = "Transfer"
 
     for member in (tx, counterpart):
+        if confidence >= 1.0:
+            # A confident link: the old category means nothing on a Transfer. A tentative (Medium)
+            # link keeps it, because rejecting the match restores the row to Income/Expense.
+            member.category = None
+            member.subcategory = None
         if member.needs_review_reason is None or should_supersede(member.needs_review_reason, TRANSFER_MATCH):
             member.needs_review = False
             member.needs_review_reason = None
@@ -223,7 +233,7 @@ def _find_tier2_candidates(session: Session, tx: Transaction) -> list[tuple[Tran
             # every plain uncategorised row instead of only the ATO ones.
             ~and_(
                 func.coalesce(Transaction.category, "") == "Income",
-                func.coalesce(Transaction.subcategory, "") == "Tax Refund",
+                func.coalesce(Transaction.subcategory, "").in_(_NEVER_HEURISTIC_SUBCATEGORIES),
             ),
         )
         .all()
@@ -285,6 +295,8 @@ def _flag_unresolved_tie_losers(others: list[Transaction]) -> None:
 
 
 def _process_tier2(session: Session, tx: Transaction) -> None:
+    if tx.category == "Income" and tx.subcategory in _NEVER_HEURISTIC_SUBCATEGORIES:
+        return
     found = _best_tier2_candidate(session, tx)
     if found is None:
         return

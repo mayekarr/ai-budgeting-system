@@ -22,6 +22,7 @@ from categorisation.taxonomy import is_valid_category
 from ingestion.account_resolution import resolve_account
 from ingestion.nab_format import NabFormatError, parse_nab_format_with_report
 from transfers.detection import find_suggested_transfer_match, link_transfer_pair, process_transfer_detection
+from transfers.card_payments import is_card_payment, mark_as_card_payment
 from transfers.loan_movements import is_loan_movement
 from transfers.refunds import detect_refund
 
@@ -353,6 +354,11 @@ async def upload_transactions(
         is_ato_override = tx.category == "Income" and tx.subcategory == "Tax Refund"
         if tx.type != "Transfer" and not is_ato_override:
             process_transfer_detection(db, tx)
+        # A card payment detection could not pair (its counterpart isn't imported yet) is still a
+        # Transfer by its text alone; a later-arriving counterpart pairs with it via Tier 1.
+        if tx.type != "Transfer" and is_card_payment(tx.raw_description, tx.amount):
+            mark_as_card_payment(tx)
+            db.commit()
 
     # Reflects only this upload's rows, not every needs-review row ever persisted — a global
     # count would misreport every upload after the first.

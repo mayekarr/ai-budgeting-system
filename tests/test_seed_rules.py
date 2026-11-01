@@ -278,3 +278,27 @@ def test_loan_interest_charge_matches_to_loans_and_finance(session):
         assert match is not None, real_description
         assert match.category == "Loans & Finance"
         assert match.subcategory == "Loan Interest"
+
+
+def test_add_missing_seed_rules_adds_only_what_is_absent_and_is_idempotent(session):
+    from categorisation.seed_rules import add_missing_seed_rules
+    seed_rules_if_empty(session)
+    victim = session.query(CategorisationRule).filter_by(pattern="P & G REAL ESTAT").one()
+    session.delete(victim)
+    session.commit()
+
+    assert add_missing_seed_rules(session) == 1
+    assert add_missing_seed_rules(session) == 0
+    assert session.query(CategorisationRule).filter_by(pattern="P & G REAL ESTAT").count() == 1
+
+
+@pytest.mark.parametrize("description", [
+    "6 Jericho Ct Berwi P & G Real Estat Anila Mayekar &",
+    "HILL2 2 Whitehorse Easte AR & RA Mayekar",
+    "MOUN115 1050 Whitehorse Easte AR Mayekar & RA",
+    "115/1050 MT ALEXAN ACCORD REAL EST ANILA ROHAN MAYE",
+])
+def test_every_rental_agent_seen_in_the_real_data_maps_to_rental_income(session, description):
+    seed_rules_if_empty(session)
+    match = match_rule(session, description)
+    assert (match.category, match.subcategory) == ("Income", "Rental Income")

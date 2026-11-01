@@ -188,6 +188,12 @@ SEED_RULES: list[dict] = [
     # Rental Income subcategory. Keyed on the managing agent's name, which should generalise to
     # future rent credits from the same property/agent, not just this one truncated description.
     dict(pattern='THE APOSTOLI GRO', match_type="substring", category='Income', subcategory='Rental Income', priority=130),
+    # Rent from the other investment properties' managing agents (2026-11-01, found when 85 rent
+    # credits sat in Miscellaneous because only the current Jericho Ct agent had a rule). Each text
+    # is an agent name plus the property's address prefix; no debit in the data matches any of them.
+    dict(pattern='P & G REAL ESTAT', match_type="substring", category='Income', subcategory='Rental Income', priority=130),
+    dict(pattern='WHITEHORSE EASTE', match_type="substring", category='Income', subcategory='Rental Income', priority=130),
+    dict(pattern='MT ALEXAN ACCORD REAL EST', match_type="substring", category='Income', subcategory='Rental Income', priority=130),
     # Real, unambiguous merchants reported live by Rohan, each independently confirmed against the
     # real xlsx's own bank Category/Merchant Name columns (Donations/Oxfam Australia; Insurance/
     # Allianz Insurance) -- see the "using bank Category/Merchant Name" note in docs/next-steps.md.
@@ -202,6 +208,25 @@ SEED_RULES: list[dict] = [
     # first; this only catches what nothing more specific already has.
     dict(pattern='CAFE', match_type="substring", category='Cafes & Restaurants', subcategory='Cafes & Coffee', priority=200),
 ]
+
+
+def add_missing_seed_rules(session: Session) -> int:
+    """
+    Add any starter rule not already present (matched on pattern + match type among seeded rules).
+    `seed_rules_if_empty` never touches a database that already has rules, so a rule added to
+    SEED_RULES later would otherwise never reach it. Idempotent. Returns how many were added.
+    """
+    existing = {
+        (r.pattern, r.match_type)
+        for r in session.query(CategorisationRule).filter(CategorisationRule.source == "seeded")
+    }
+    added = 0
+    for rule in SEED_RULES:
+        if (rule["pattern"], rule["match_type"]) not in existing:
+            session.add(CategorisationRule(source="seeded", is_active=True, **rule))
+            added += 1
+    session.commit()
+    return added
 
 
 def seed_rules_if_empty(session: Session) -> int:
