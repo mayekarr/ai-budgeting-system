@@ -28,7 +28,12 @@ def main(argv: list[str]) -> int:
         return 1
     create_tables()
     with session_scope() as session:
-        result = apply_corrections(session, load_corrections(path), commit=False)
+        try:
+            entries = load_corrections(path)
+        except ValueError as exc:
+            print(exc)
+            return 1
+        result = apply_corrections(session, entries, commit=False)
         if dry_run:
             session.rollback()
     print(("DRY RUN (rolled back). " if dry_run else "") +
@@ -37,7 +42,10 @@ def main(argv: list[str]) -> int:
     for key in ("not_found", "ambiguous", "invalid", "skipped_grouped"):
         for entry in result[key]:
             problems += 1
-            print(f"  {key}: {entry['date']} {entry['amount']} {entry['description']!r}")
+            if isinstance(entry, dict):
+                print(f"  {key}: {entry.get('date')} {entry.get('amount')} {entry.get('description')!r}")
+            else:
+                print(f"  {key}: {entry!r}")
     return 1 if problems else 0
 
 

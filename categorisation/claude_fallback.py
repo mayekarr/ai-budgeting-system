@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from backend.models import CategorisationRule
 from backend.needs_review_reasons import LLM_UNAVAILABLE
-from categorisation.taxonomy import TAXONOMY, is_valid_category
+from categorisation.taxonomy import LLM_CATEGORIES, is_valid_category
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ _TOOL_SCHEMA = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "category": {"type": "string", "enum": list(TAXONOMY.keys())},
+            "category": {"type": "string", "enum": LLM_CATEGORIES},
             "subcategory": {"type": ["string", "null"]},
             "confidence": {"type": "number", "minimum": 0, "maximum": 1},
             "merchant_pattern": {
@@ -80,7 +80,7 @@ def _get_client(client: Optional["anthropic.Anthropic"]) -> "anthropic.Anthropic
 
 
 def _build_prompt(raw_description: str) -> str:
-    categories = ", ".join(TAXONOMY.keys())
+    categories = ", ".join(LLM_CATEGORIES)
     return (
         "Categorise this bank transaction description into exactly one of these categories: "
         f"{categories}. Include a subcategory if one of the category's known subcategories "
@@ -139,7 +139,7 @@ def categorise_with_fallback(
     # return a schema-legal but taxonomy-invalid pairing (e.g. Groceries/Flights). A promoted rule
     # is permanent and auto-applies to every future match, so an invalid pairing must never be
     # promoted, regardless of confidence — it's flagged for review instead.
-    valid_pair = is_valid_category(category, subcategory)
+    valid_pair = category in LLM_CATEGORIES and is_valid_category(category, subcategory)
     needs_review = confidence < CONFIDENCE_THRESHOLD or not valid_pair
 
     if not needs_review:

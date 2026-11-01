@@ -143,3 +143,19 @@ def test_uses_haiku_model_for_cost(session):
 
     _, kwargs = client.messages.create.call_args
     assert kwargs["model"] == "claude-haiku-4-5-20251001"
+
+
+def test_manual_only_investment_category_is_not_offered_to_the_llm(session):
+    from categorisation.claude_fallback import _TOOL_SCHEMA, _build_prompt
+    assert "Investment" not in _TOOL_SCHEMA["input_schema"]["properties"]["category"]["enum"]
+    assert "Investment" not in _build_prompt("SOME BROKER")
+
+
+def test_llm_answer_in_a_manual_only_category_is_flagged_not_promoted(session):
+    client = MagicMock()
+    client.messages.create.return_value = _fake_tool_use_response("Investment", "Property Purchase", 0.95)
+
+    result = categorise_with_fallback(session, "SOME BROKER", client=client)
+
+    assert result.needs_review is True
+    assert session.query(CategorisationRule).filter_by(source="llm_promoted").count() == 0

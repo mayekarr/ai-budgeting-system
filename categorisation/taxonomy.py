@@ -38,6 +38,11 @@ TAXONOMY: dict[str, list[str]] = {
 
 CATEGORIES: list[str] = list(TAXONOMY.keys())
 
+# Categories only a person assigns (capital outlays tagged one by one); the LLM fallback is not
+# offered them, so a routine brokerage/ETF row can't be filed as a property purchase.
+MANUAL_ONLY_CATEGORIES: frozenset[str] = frozenset({"Investment"})
+LLM_CATEGORIES: list[str] = [c for c in CATEGORIES if c not in MANUAL_ONLY_CATEGORIES]
+
 
 def is_valid_category(category: str, subcategory: str | None = None) -> bool:
     """Validate a (category, subcategory) pair against the taxonomy."""

@@ -31,7 +31,14 @@ _TYPES = {"Income", "Expense", "Transfer"}
 
 
 def load_corrections(path: Path) -> list[dict[str, Any]]:
-    return json.loads(Path(path).read_text(encoding="utf-8"))["corrections"]
+    """The `corrections` list from the JSON file; ValueError with a plain message if the file is bad."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{path} is not valid JSON ({exc}); expected {{\"corrections\": [...]}}") from exc
+    if not isinstance(data, dict) or not isinstance(data.get("corrections"), list):
+        raise ValueError(f'{path} must be an object with a "corrections" list')
+    return data["corrections"]
 
 
 def _parse(entry: dict[str, Any]) -> tuple[date, float, str, dict[str, Any]] | None:
@@ -43,11 +50,17 @@ def _parse(entry: dict[str, Any]) -> tuple[date, float, str, dict[str, Any]] | N
         tx_type = entry["type"]
         if tx_type not in _TYPES:
             return None
+        expect = entry.get("expect", 1)
+        if type(expect) is not int or expect < 1:
+            return None
         if tx_type == "Transfer":
             target: dict[str, Any] = {"type": "Transfer", "category": None, "subcategory": None, "is_refund": False}
         else:
             category, subcategory = entry["category"], entry.get("subcategory")
             if not is_valid_category(category, subcategory):
+                return None
+            # Income rows carry the Income category and nothing else does; a mismatch is a typo.
+            if (tx_type == "Income") != (category == "Income"):
                 return None
             target = {"type": tx_type, "category": category, "subcategory": subcategory}
             # Only touch the refund flag when the entry says so; auto-detection stays otherwise.

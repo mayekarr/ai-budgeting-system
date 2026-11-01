@@ -208,3 +208,50 @@ def test_is_refund_is_left_alone_when_the_entry_does_not_mention_it(session):
                                  "type": "Income", "category": "Income", "subcategory": "Tax Refund"}])
     session.refresh(tx)
     assert tx.is_refund is True and tx.subcategory == "Tax Refund"
+
+
+@pytest.mark.parametrize("bad_expect", ["2", 2.0, 0, True, -1])
+def test_non_integer_or_non_positive_expect_is_invalid_not_ambiguous(session, bad_expect):
+    _tx(session, date(2022, 5, 24), -209404.48, "SETTLEMENT SHORTFALL")
+    result = apply_corrections(session, [_entry(expect=bad_expect)])
+    assert len(result["invalid"]) == 1 and result["ambiguous"] == []
+
+
+@pytest.mark.parametrize("entry", [
+    _entry(type="Expense", category="Income", subcategory="Property Sale Proceeds"),
+    _entry(type="Income", category="Investment", subcategory="Property Purchase"),
+])
+def test_type_must_agree_with_category(session, entry):
+    tx = _tx(session, date(2022, 5, 24), -209404.48, "SETTLEMENT SHORTFALL")
+    result = apply_corrections(session, [entry])
+    session.refresh(tx)
+    assert len(result["invalid"]) == 1 and tx.category == "Miscellaneous"
+
+
+@pytest.mark.parametrize("content", ["{not json", '{"correction": []}', '{"corrections": {"a": 1}}', "[1, 2]"])
+def test_load_corrections_raises_a_clear_error_for_a_bad_file(tmp_path, content):
+    path = tmp_path / "c.json"
+    path.write_text(content, encoding="utf-8")
+    with pytest.raises(ValueError, match="corrections"):
+        load_corrections(path)
+
+
+def test_script_reports_malformed_entries_without_crashing(tmp_path, monkeypatch, capsys):
+    from scripts import apply_corrections as script
+    path = tmp_path / "c.json"
+    path.write_text(json.dumps({"corrections": ["just a string", {"type": "Transfer"}]}), encoding="utf-8")
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=engine)
+    from contextlib import contextmanager
+
+    @contextmanager
+    def scope():
+        with Session(engine) as s:
+            yield s
+            s.commit()
+
+    monkeypatch.setattr(script, "session_scope", scope)
+    monkeypatch.setattr(script, "create_tables", lambda: None)
+    assert script.main(["x", str(path)]) == 1
+    out = capsys.readouterr().out
+    assert "invalid" in out and "just a string" in out
