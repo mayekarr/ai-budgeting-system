@@ -35,7 +35,68 @@ index. Performance items P1–P5 come from a measured review on 2026-09-25 (Roha
 feeling slow) — kept in their recommended relative order, interleaved with the journey work by when
 each one actually matters.
 
-**Next session — start here (updated 2026-10-18, end of session).** Jobs 1 and 2 below are done and
+**Next session — START HERE (updated 2026-11-01, end of session).** Everything below this block that is dated
+2026-10-18 or earlier is history; the long dated notes further down record what was built and why.
+
+*State at hand-off.* `main` is pushed and up to date at `4e93b44`; the only untracked file is
+`.claude/settings.local.json`, left out of commits on purpose. 606 tests pass. The real `finance.db` has 10,362 rows
+and is consistent with the code: 950 transfer pairs (every one exactly two rows: 853 matched on an account number
+or reference, 97 on an exact amount and date), 33 lone transfers (card payments whose other side isn't imported, and
+debits to Macquarie), the bank's own `Category` saved on 10,319 rows, rent linked to its assets, and capital &
+financing events (loan drawdowns/paydowns, share and super contributions, property sale/purchase) separated from
+day-to-day by the `scope` switch on Overview and Portfolio. The dashboard (port 8501) and API (port 8000) may still be
+running from this session; restart with the commands in `CLAUDE.md`. Timestamped backups are in `db-backups/`
+(gitignored); the one to restore from if something looks wrong is `finance-2026-11-01-pre-review7.db`.
+
+*What the session settled* (all in `docs/product-requirements.md`; read FR-9l and FR-9m first): a transfer is an
+exact-amount move between Rohan's own accounts and nothing else; the bank type and the bank `Category` can rule a
+pairing out but never prove one; a group is always two rows; an account-number/reference match (Tier 1) overrides an
+amount-and-date guess (Tier 2); loan paydowns, share/super contributions and drawdowns are real flows, not Transfers.
+
+*Do these, in order:*
+1. **Item 5, the MAC / MACACC / NBA statement parsers.** Only the NAB-style CC/RC/AC/JC files parse today. The formats:
+   MAC and MACACC are Macquarie-style (separate Debit and Credit columns), NBA is headerless (date, amount,
+   description, balance); the files are in `transaction-files/`. Why it is first: it lets the 21 lone Macquarie
+   debits (about $600k) pair with their credit side, shows where those funds went next (Rohan's question), and gives
+   the "Sydney travel" reimbursements their real source account. Tests-first (`tdd-workflow`): start by reading how
+   the NAB importer plugs into `/transactions/upload`, then write parser tests against the real files. Register the
+   three accounts and their numbers as `AccountAlias`es (spaces and hyphens in a number are already ignored); set
+   `raw_transaction_type` to something the matcher understands; save a bank category if the file has one. Rows
+   from other formats have a blank category and bank type, which the matcher allows.
+2. **Clear 108 stale review flags.** 108 rows carry `needs_review_reason = transfer_match` but are in no pair. The
+   removed "Low band" created them; nothing makes them any more. They show on Needs Review as "No current candidate
+   match / Dismiss". Write a small tested one-off that clears `transfer_match` on rows with no group and re-run
+   `tidy_categories`. (Do before step 1 so the queue is clean when MAC/NBA rows start producing new flags.)
+3. **Make "Not a transfer" stick.** A rejection is not remembered, so a later `repair_transfer_groups` or an upload
+   can pair the same two rows again. Design in the backlog item of that name below (a small `TransferRejection`
+   record checked by Tier 1 and Tier 2). A pair the user confirms by hand is already final.
+4. **Triage the review queue and Miscellaneous.** 734 `llm_unavailable` (no Anthropic API key), 45
+   `refund_ambiguity`, 3 `unrecognised_account`, and 228 Miscellaneous credits (~$55k) that are mostly one-offs
+   needing Rohan's memory (see the two backlog items; NAB Consumer Credit Insurance Refund and Trip.com are low
+   priority). A working API key would clear most of the 734 automatically.
+5. **Later, unchanged:** the CC history Oct 2019 to Feb 2020 (needs a PDF statement parser; 11 JC card-autopay debits
+   from then have no card side), performance items P3/P4, the J8 historical backfill, and moving the repo out of
+   OneDrive (P5). See the numbered list further down.
+
+*Working notes that cost time this session.*
+- `git push` is blocked for me by Claude Code's permission check; Rohan pushes by typing `! git push origin main` as
+  its own line at the prompt (pasted as ordinary text it does not run).
+- Python is denied direct read access to `transaction-files/*.xlsx` here, while `cp` works: copy the files to a scratch
+  folder and point `python -m scripts.backfill_bank_category <folder>` at it (it expects the names
+  `BankTransactions - long - AC|CC|JC|RC.xlsx`). Run from Rohan's own shell it reads them in place.
+- The Bash tool mis-parses long heredocs containing quotes: write files with the Write/Edit tools, and run edit
+  scripts from a file. In this environment a Python heredoc also turns `\n` inside test files into real newlines.
+- Streamlit renders text between two `$` as maths: escape dollar signs in any `st.write`/`caption` showing two amounts.
+- The seven `/code-review` rounds on the transfer work ended in edge cases; do not re-review that area unless it changes.
+- Local data files that are NOT in git and must be kept: `config/assets.local.json`, `config/corrections.local.json`,
+  `transaction-files/`, `db-backups/`, `finance.db`. Idempotent scripts that bring a database in line with the code:
+  `scripts.tidy_categories`, `scripts.apply_corrections`, `scripts.seed_assets`, `scripts.repair_transfer_groups
+  --backup <older copy>`, `scripts.backfill_bank_category <folder>`. Take a backup before running any of them.
+
+~~**Next session — start here (updated 2026-10-18, end of session).**~~ — **Done/superseded 2026-11-01**: its three
+jobs (seed the old loans, the one-off tags, verify and commit) were finished that day; kept below as history.
+
+(2026-10-18 hand-off, history:) Jobs 1 and 2 below are done and
 job 3 (item 4b) is half done. State at hand-off: 347 tests passing; `main` pushed at `35cc640`;
 the real `finance.db` has the fixed CC data (6,567 rows, balances match the bank's statements) and
 the 7 loan drawdown/paydown rows typed `Transfer`. Backups are in the gitignored `db-backups/`
