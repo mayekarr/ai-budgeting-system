@@ -89,7 +89,7 @@ Replaces `backend/api.py`'s 3 endpoints; keeps its FastAPI/CORS/dependency-injec
 |---|---|---|
 | `POST /accounts` | Register an account (or auto-created on first statement upload referencing an unrecognised identifier, flagged for confirmation) | J1 |
 | `GET /accounts` | List accounts | J1 |
-| `POST /transactions/upload` | Upload a statement; auto-detects which of the 3 raw formats by column signature, resolves the account via `AccountAlias`, normalizes to a common shape before persisting | J1 |
+| `POST /transactions/upload` | Upload a statement; auto-detects which of the 3 raw formats from the file's layout (NAB: an `Amount` column; Macquarie: `Debit` and `Credit` columns; CommBank NBA: no header row, four columns date, amount, description, balance), resolves the account via `AccountAlias`, normalizes to a common shape before persisting. Optional `account` query parameter (the account's name or alias, matched ignoring case): required for the headerless NBA file, which names no account; an unknown value is a 400; ignored for the other formats | J1 |
 | `GET /transactions` | Filterable list: `date_from`/`date_to`, `account_id`, `category`, `type`, `is_refund`, `asset_id`, `needs_review`, `transfer_group_id` (added 2026-08-18 — lets the Transfers review UI fetch every leg of a group in one call) | J2, J3, J6 |
 | `PATCH /transactions/{id}` | Category correction; also settable: `is_refund`, `transfer_group_id`, for resolving review-queue items | J4, J5 |
 | `GET /transactions/needs-review` | The review queue (low-confidence categorisation *and* low-confidence transfer/refund matches) | J5 |

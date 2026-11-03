@@ -75,8 +75,11 @@ project's standing operating mode, not a temporary gap — plain `uvicorn backen
    ```
    Files: `BankTransactions - CC.xlsx`, then `- RC.xlsx`, then `- AC.xlsx`, then `- JC.xlsx` — all
    in `transaction-files/`. The dashboard caches reads for up to 30 seconds, so give it that long
-   (or restart it) before new uploads appear. **Skip MAC, MACACC, and NBA** — a different
-   export shape the parser doesn't support yet (see "What's not in this demo" below). Uploading
+   (or restart it) before new uploads appear. **Skip MAC, MACACC, and NBA** — they are
+   supported now (since 2026-11-03) but are not part of this four-file walkthrough; the NBA file
+   has no header or account column, so it is uploaded with `?account=<its alias>`, for example
+   `curl.exe -F "file=@transaction-files/BankTransactions - long - NBA.xlsx"
+   "http://127.0.0.1:8000/transactions/upload?account=NBA"`. Uploading
    CC first matters: the seed rules were derived from CC's own historical data, so it has the
    highest rule-match rate and gives the cleanest "instant categorisation" moment before you get to
    the unmatched rows.
@@ -211,7 +214,7 @@ they show up whether or not you have a real key set):
   concrete "before" example if you want to demo a fresh rule gap being found and closed.
   **A genuinely unresolvable case, not a bug**: several `-$5,000 "Trans salary"` debits have no
   matching credit anywhere in the uploaded data (their counterpart is almost certainly on MAC/
-  MACACC/NBA — the unsupported export formats) — correctly stuck here rather than guessed at.
+  MACACC/NBA — formats this four-file demo does not upload) — correctly stuck here rather than guessed at.
   Good moment to contrast with the next bullet's genuinely-resolved transfer pairs.
 - **`unrecognised_account`** — `HILLS MEATS PTY LTDHILLS Forest Hill 036` (-$38.66) — its statement
   account identifier couldn't be confidently resolved to a known account, shown for visibility (no
@@ -233,11 +236,11 @@ the reason why, and one click resolves it."
 
 ## What's not in this demo (documented gaps, not surprises)
 
-- MAC/MACACC/NBA statement formats — parser doesn't support them yet (README-documented fast-follow).
-- The full 3-account RC→MAC→MACACC transfer chain — depends on the above; only the AC↔JC and JC↔CC
-  pairs above are demoable today.
+- MAC/MACACC/NBA statements — the parsers exist (2026-11-03) but this four-file demo does not upload them.
+- The full 3-account RC→MAC→MACACC transfer chain — appears once MAC and MACACC are uploaded; with only
+  the four files above, just the AC↔JC and JC↔CC pairs are demoable.
 - Unrecognised-account resolution UI (rename/merge) — flagged for visibility only, no fix-it action.
 - J8 and Phase 2 (forecasting, cloud deployment) — see the table at the top of this doc.
 - Dividends aren't tagged to `Share Portfolio` yet: only the share loan's interest is. Tagging them
-  needs `AssetAlias` patterns for the holdings, and MAC (where the dividends land) can't be parsed
-  yet anyway.
+  needs `AssetAlias` patterns for the holdings; MAC (where the dividends land) parses now but is not
+  part of this demo.

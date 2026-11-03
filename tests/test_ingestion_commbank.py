@@ -96,6 +96,24 @@ def test_slash_dates_in_a_csv_are_read_day_first():
     assert [r.date for r in rows] == [date(2026, 9, 30), date(2026, 9, 5)]
 
 
+def test_year_first_slash_dates_are_not_swapped_by_the_day_first_rule():
+    # 2026/09/05 is 5 Sep; reading it day-first would give 9 May.
+    csv = "2026/09/30,5033.81,Salary STAFF DEPARTMENT 00497982,5080.54\n2026/09/05,-46.00,MORE TELECOM AU,47.00\n"
+
+    rows = _parse(csv).rows
+
+    assert [r.date for r in rows] == [date(2026, 9, 30), date(2026, 9, 5)]
+
+
+def test_a_payment_out_worded_salary_is_not_a_salary_credit():
+    csv = "2026-09-30,5033.81,Salary STAFF DEPARTMENT 00497982,5080.54\n2026-09-29,-500.00,Salary sacrifice contribution,4580.00\n"
+
+    credit, debit = _parse(csv).rows
+
+    assert credit.raw_transaction_type == "SALARY" and credit.category_hint == ("Income", "Salary")
+    assert debit.raw_transaction_type == "PURCHASE AUTHORISATION" and debit.category_hint is None
+
+
 def test_the_result_names_the_institution_so_an_account_can_be_stamped_with_it():
     assert _parse().institution == "CommBank"
 

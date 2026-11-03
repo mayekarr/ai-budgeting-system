@@ -30,6 +30,7 @@ from ingestion.seam_repeats import drop_seam_repeats
 
 _COLUMNS = ["date", "amount", "description", "balance"]
 
+_YEAR_FIRST_RE = re.compile(r"^\s*\d{4}\D")   # 2026/09/05 is year-month-day; day-first would swap month and day
 _SALARY_RE = re.compile(r"^\s*Salary\b", re.IGNORECASE)
 _DIVIDEND_RE = re.compile(r"\bDIV\b|\bDIVIDEND\b", re.IGNORECASE)
 _REFUND_RE = re.compile(r"^\s*Refund\b", re.IGNORECASE)
@@ -50,7 +51,7 @@ class CommbankFormatError(NabFormatError):
 
 def _to_date(value):
     """A real date as is; a text date with slashes is dd/mm/yyyy (CommBank's CSV), never month-first."""
-    if isinstance(value, str) and "/" in value:
+    if isinstance(value, str) and "/" in value and not _YEAR_FIRST_RE.match(value):
         return pd.to_datetime(value, dayfirst=True).date()
     return pd.to_datetime(value).date()
 
@@ -58,7 +59,7 @@ def _to_date(value):
 def _bank_type(description: str, amount: float) -> str:
     if _TRAVEL_ACCOUNT_RE.search(description):
         return "DEPOSIT" if amount > 0 else "PURCHASE AUTHORISATION"   # never a transfer leg
-    if _SALARY_RE.search(description):
+    if amount > 0 and _SALARY_RE.search(description):
         return "SALARY"
     if amount > 0 and _DIVIDEND_RE.search(description):
         return "DIVIDEND"
