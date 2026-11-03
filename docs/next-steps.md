@@ -78,7 +78,8 @@ amount-and-date guess (Tier 2); loan paydowns, share/super contributions and dra
    `refund_ambiguity`, 3 `unrecognised_account`, and 228 Miscellaneous credits (~$55k) that are mostly one-offs
    needing Rohan's memory (see the two backlog items; NAB Consumer Credit Insurance Refund and Trip.com are low
    priority). A working API key would clear most of the 734 automatically.
-5. **Later, unchanged:** the CC history Oct 2019 to Feb 2020 (needs a PDF statement parser; 11 JC card-autopay debits
+5. **Dashboard UI requirements (added 2026-11-03, Rohan; full text in `docs/product-requirements.md` 4.6).** Three items, none started. **UI-3 first, it is a bug:** in the Custom date range, picking a 'to' date in a later month loses the 'from' date (Overview, Portfolio and Transfers); reproduce with an `AppTest` first (`tdd-workflow`), fix once in a shared helper in `frontend/date_ranges.py`. **UI-2:** an 'All time' option in the shared presets (only Transfers has it today), small and best done in the same change as UI-3. **UI-1:** an Excel-style filter on every column header of every table (Category Drill-in, Portfolio x2, Transfers x2, Overview year-on-year); the largest of the three and a design choice first (a shared filtering helper over `st.dataframe`, or a grid component), so plan it before building.
+6. **Later, unchanged:** the CC history Oct 2019 to Feb 2020 (needs a PDF statement parser; 11 JC card-autopay debits
    from then have no card side), performance items P3/P4, the J8 historical backfill, and moving the repo out of
    OneDrive (P5). See the numbered list further down.
 

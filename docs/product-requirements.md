@@ -605,6 +605,31 @@ phase concern, not fixed here.
 - FR-18: The forecast horizon and refresh cadence are an open decision — to be defined in Phase 2
   design, not in this MVP-focused document.
 
+### 4.6 Dashboard UI requirements (added 2026-11-03, Rohan; none built yet)
+
+- **UI-1 (column filters on every table):** wherever the dashboard shows a table, the user can filter on any
+  column from its header, as in Excel: pick values from a list of that column's distinct values, search text in a
+  text column, and give a from/to range for a number or date column. Filters on several columns combine (AND), a
+  filtered column is visibly marked, one control clears every filter on that table, and the row count and any
+  totals shown with the table follow the filtered rows. Tables today: Category Drill-in
+  (`frontend/pages/2_Category_Drill_in.py`), Portfolio (`4_Portfolio.py`, two tables), Transfers (`5_Transfers.py`,
+  two tables) and the Overview year-on-year table (`1_Overview.py`). Design note, not decided: Streamlit's
+  `st.dataframe` sorts and searches but has no per-column filter, so this probably means a small shared helper that
+  filters the DataFrame before it is shown (one filter control per column, kept in session state) or a third-party
+  grid component; pick one for all tables rather than per page.
+- **UI-2 (an "All time" date range):** every date-range selector offers "All time" (no date limit: from the
+  earliest transaction to today), alongside This Month, Last Month, YTD, Last 12 Months and Custom. Today only the
+  Transfers page has it (its own `ALL_TIME` constant); Overview (`1_Overview.py`) and Portfolio (`4_Portfolio.py`)
+  use `PRESETS` from `frontend/date_ranges.py` without it. Move the option into that shared module so all pages get
+  it from one place, and resolve it there.
+- **UI-3 (bug: custom date range loses the "from" date):** in the Custom range calendar, if the "to" date picked is
+  in a later month than the "from" date (one month or more), the "from" selection is lost. Seen on every page that
+  has a Custom range (Overview line 25, Portfolio line 23, Transfers line 35). Cause not yet investigated; first
+  suspect is that the page recomputes `date_from` / `date_to` from `resolve_date_range("Custom", today)` on the rerun
+  Streamlit triggers after the first of the two clicks, when `st.date_input` returns a one-date tuple and the code falls
+  back to those defaults. Reproduce with an `AppTest` (the `tdd-workflow` skill: write the failing test first), fix once in a
+  shared helper so the three pages cannot drift apart.
+
 ## 5. Non-Functional Requirements
 
 - NFR-1 (Deployment): Runs entirely locally for MVP (local web server + local storage, e.g.
