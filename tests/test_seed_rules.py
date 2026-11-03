@@ -75,6 +75,19 @@ def test_salary_and_dividend_credits_match_to_income(session):
         assert match.subcategory == "Dividends & Distributions"
 
 
+def test_final_dividends_are_dividends_like_the_interim_ones(session):
+    # The bank's own category left these as plain 'Income' with no subcategory (19 real rows, $6,049).
+    seed_rules_if_empty(session)
+
+    for real_description in (
+        "SD202/00812630 NAB FINAL DIV ROHAN MAYEKAR",
+        "DV212/00366803 NAB FINAL DIV ANILA MAYEKAR",
+    ):
+        match = match_rule(session, real_description)
+        assert match is not None, real_description
+        assert (match.category, match.subcategory) == ("Income", "Dividends & Distributions")
+
+
 def test_loan_repayment_debit_matches_to_loans_and_finance(session):
     # Same real gap as the Income patterns above, reported live by Rohan: "LOAN REPAYMENT TO A/C
     # 703206283 MAYEKAR A" (a real EMI/bank-loan debit from transaction-files/BankTransactions -

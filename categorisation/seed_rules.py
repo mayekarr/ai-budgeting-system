@@ -168,6 +168,7 @@ SEED_RULES: list[dict] = [
     # in the needs-review queue rather than being force-categorised by a blanket rule.
     dict(pattern='SALARY/WAGES', match_type="substring", category='Income', subcategory='Salary', priority=124),
     dict(pattern='NAB INTERIM DIV', match_type="substring", category='Income', subcategory='Dividends & Distributions', priority=125),
+    dict(pattern='NAB FINAL DIV', match_type="substring", category='Income', subcategory='Dividends & Distributions', priority=125),
     dict(pattern='EQUATEPLUS DIVIDENDS', match_type="substring", category='Income', subcategory='Dividends & Distributions', priority=126),
     # Real, unambiguous bank-labelled EMI/loan text (transaction-files/), same gap as above but on
     # the expense side -- reported live by Rohan.
