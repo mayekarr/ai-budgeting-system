@@ -30,6 +30,7 @@ def main(argv: list[str]) -> int:
         result = seed_assets(session, load_config(path))
     print(
         f"Seeded {result['assets']} assets, {result['loans']} loans and {result['accounts']} accounts; "
+        f"{result['aliases_removed']} asset aliases no longer in the file removed; "
         f"asset tag changed on {result['tagged']} existing transactions."
     )
     return 0

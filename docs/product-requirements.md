@@ -205,6 +205,16 @@ covering **all** accounts including income):
   transactions; share/fund assets get Dividend/Buy/Sell-tagged transactions. This lets the dashboard
   show a single portfolio view across all investment types, or filter to one asset — directly
   supporting the user's "review all my investments" use case.
+  **Decided 2026-11-03 (dividends, Rohan's call): a share holding is one asset per issuer or pool, and its
+  dividends are tagged to it by payer pattern.** The ETF portfolio is `Share Portfolio` (the MLC MKIS and
+  Australian Investment Exchange purchases, the share loan, and the ETF distributions that land in MAC: `QUAL DST`,
+  `AQLT DST`, `MVW DST`, `IFRA DST`, `VAS/VAP PAYMENT`, `VEU DIVIDEND`, `VGAD PAYMENT`); NAB, CBA and
+  Anila's NAB employee share plan are `NAB Shares` and `CBA Shares`, which hold dividends only so far; two
+  credits from Citibank Europe sit on `Citibank Europe` until Rohan says what they are. Why by payer, not by
+  category: the three holdings share one category (`Income / Dividends & Distributions`), so only the payer text
+  tells them apart. Consequence: a new ETF ticker is untagged until an alias is added to `config/assets.local.json`.
+  Tags never change a category. `scripts.seed_assets` treats the file as the source of truth for any asset that
+  lists `aliases`, so removing a pattern from it removes the alias and un-tags its rows.
   **Decided 2026-09-25 (J6 design pass, Rohan's calls):**
   - **A loan is an `Account`** (`account_type="Loan"`), with its loan number as an `AccountAlias`
     and an `asset_id` link to the asset it finances. The other options were a separate `Loan` table

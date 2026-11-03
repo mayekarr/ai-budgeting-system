@@ -241,6 +241,6 @@ the reason why, and one click resolves it."
   the four files above, just the AC↔JC and JC↔CC pairs are demoable.
 - Unrecognised-account resolution UI (rename/merge) — flagged for visibility only, no fix-it action.
 - J8 and Phase 2 (forecasting, cloud deployment) — see the table at the top of this doc.
-- Dividends aren't tagged to `Share Portfolio` yet: only the share loan's interest is. Tagging them
-  needs `AssetAlias` patterns for the holdings; MAC (where the dividends land) parses now but is not
-  part of this demo.
+- Dividends are tagged to their holdings (the ETF `Share Portfolio`, `NAB Shares`, `CBA Shares`) by payer
+  patterns, but only once MAC, NBA and the NAB accounts' dividend rows are uploaded; this four-file demo
+  does not include MAC or NBA, so the ETF and CBA dividends will not appear in it.

@@ -135,6 +135,60 @@ def test_seed_moves_an_alias_that_changed_assets_in_the_config(session):
     assert alias.asset.name == "Share Portfolio"
 
 
+def test_an_alias_dropped_from_the_config_is_removed_and_its_rows_are_untagged(session):
+    # The file is the source of truth for an asset that lists aliases: narrowing a pattern must take effect.
+    jc = Account(name="JC")
+    session.add(jc)
+    session.flush()
+    tx = Transaction(account_id=jc.id, date=date(2026, 8, 5), amount=2704.86, raw_description="6 Jericho Ct Berwi")
+    session.add(tx)
+    session.commit()
+    seed_assets(session, CONFIG)
+    session.commit()
+    assert tx.asset.name == "Jericho Ct"
+
+    narrowed = {"assets": [{"name": "Jericho Ct", "type": "Real Estate", "aliases": ["7 JERICHO CT"]}]}
+    result = seed_assets(session, narrowed)
+    session.commit()
+
+    assert result["aliases_removed"] == 1
+    assert [a.pattern for a in session.query(AssetAlias)] == ["7 JERICHO CT"]
+    assert tx.asset is None
+
+
+def test_an_asset_that_lists_no_aliases_keeps_the_ones_it_has(session):
+    # e.g. an alias added through POST /assets for an asset the file does not describe in detail.
+    seed_assets(session, CONFIG)
+    session.commit()
+
+    result = seed_assets(session, {"assets": [{"name": "Jericho Ct", "type": "Real Estate"}]})
+    session.commit()
+
+    assert result["aliases_removed"] == 0
+    assert [a.pattern for a in session.query(AssetAlias)] == ["6 JERICHO CT"]
+
+
+def test_an_alias_moved_to_another_asset_is_not_removed_with_its_old_owner(session):
+    seed_assets(session, CONFIG)
+    session.commit()
+    moved = {"assets": [
+        {"name": "Jericho Ct", "type": "Real Estate", "aliases": []},
+        {"name": "Share Portfolio", "type": "Shares", "aliases": ["6 JERICHO CT"]},
+    ]}
+
+    seed_assets(session, moved)
+    session.commit()
+
+    assert session.query(AssetAlias).filter_by(pattern="6 JERICHO CT").one().asset.name == "Share Portfolio"
+
+
+def test_a_second_run_removes_nothing(session):
+    seed_assets(session, CONFIG)
+    session.commit()
+
+    assert seed_assets(session, CONFIG)["aliases_removed"] == 0
+
+
 @pytest.mark.parametrize("pattern", ["", "  "])
 def test_seed_rejects_a_blank_alias(session, pattern):
     with pytest.raises(ValueError, match="blank"):

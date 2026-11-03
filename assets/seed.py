@@ -100,10 +100,35 @@ def _upsert_account(session: Session, spec: dict) -> Account:
     return account
 
 
+def _prune_aliases(session: Session, specs: list[dict], assets: list[Asset]) -> int:
+    """
+    For an asset whose entry lists `aliases`, the file is the source of truth: a stored alias it no longer
+    names is removed, so narrowing a pattern in the file actually takes effect. An asset whose entry has no
+    `aliases` key is left alone (its aliases may have been added through POST /assets). Run after every asset
+    is upserted, so an alias the file moved to another asset belongs to that asset by now and is not touched.
+    """
+    removed = 0
+    for spec, asset in zip(specs, assets):
+        if "aliases" not in spec:
+            continue
+        kept = {clean_alias(p) for p in spec["aliases"]}
+        for alias in session.query(AssetAlias).filter_by(asset_id=asset.id).all():
+            if alias.pattern not in kept:
+                session.delete(alias)
+                removed += 1
+    session.flush()
+    return removed
+
+
 def seed_assets(session: Session, config: dict) -> dict:
     """Apply the config, then re-derive asset tags on already-uploaded rows. Caller commits."""
-    assets = [_upsert_asset(session, spec) for spec in config.get("assets", [])]
+    specs = config.get("assets", [])
+    assets = [_upsert_asset(session, spec) for spec in specs]
+    aliases_removed = _prune_aliases(session, specs, assets)
     loans = [_upsert_loan(session, spec) for spec in config.get("loans", [])]
     accounts = [_upsert_account(session, spec) for spec in config.get("accounts", [])]
     tagged = reattribute_assets(session)
-    return {"assets": len(assets), "loans": len(loans), "accounts": len(accounts), "tagged": tagged}
+    return {
+        "assets": len(assets), "loans": len(loans), "accounts": len(accounts), "tagged": tagged,
+        "aliases_removed": aliases_removed,
+    }
