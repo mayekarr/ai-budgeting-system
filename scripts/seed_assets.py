@@ -1,5 +1,6 @@
 """
-Set up assets and loan accounts from config/assets.local.json (J6).
+Set up assets, loan accounts and plain accounts (with their statement aliases) from
+config/assets.local.json (J6).
 
 Usage (from the repo root, with the venv active):
     python -m scripts.seed_assets [path/to/config.json]
@@ -27,7 +28,10 @@ def main(argv: list[str]) -> int:
     create_tables()
     with session_scope() as session:
         result = seed_assets(session, load_config(path))
-    print(f"Seeded {result['assets']} assets and {result['loans']} loans; asset tag changed on {result['tagged']} existing transactions.")
+    print(
+        f"Seeded {result['assets']} assets, {result['loans']} loans and {result['accounts']} accounts; "
+        f"asset tag changed on {result['tagged']} existing transactions."
+    )
     return 0
 
 

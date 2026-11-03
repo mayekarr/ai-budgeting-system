@@ -67,9 +67,43 @@ def _upsert_loan(session: Session, spec: dict) -> Account:
     return account
 
 
+def _upsert_account(session: Session, spec: dict) -> Account:
+    """
+    A plain account (e.g. a Macquarie account, whose statement names the account rather than giving a
+    number) keyed by its aliases. An alias already registered, including by an upload that auto-created
+    the account from the raw identifier, selects that account, which is then renamed and completed.
+    """
+    identifiers = list(dict.fromkeys(i.strip() for i in spec.get("aliases", []) if i.strip()))  # no repeats
+    if not identifiers:
+        raise ValueError(f"Account {spec['name']!r} needs at least one alias.")
+    existing = session.query(AccountAlias).filter(AccountAlias.raw_identifier.in_(identifiers)).all()
+    owners = {alias.account_id for alias in existing}
+    if len(owners) > 1:
+        raise ValueError(f"Aliases for account {spec['name']!r} already belong to different accounts.")
+
+    if any(alias.account.account_type == LOAN_ACCOUNT_TYPE for alias in existing):
+        raise ValueError(f"An alias for account {spec['name']!r} belongs to a loan account; list loans under 'loans'.")
+
+    account = existing[0].account if existing else Account(name=spec["name"])
+    if not existing:
+        session.add(account)
+        session.flush()
+    account.name = spec["name"]
+    for field in ("institution", "owner", "account_type"):
+        if field in spec:
+            setattr(account, field, spec[field])
+    known = {alias.raw_identifier for alias in existing}
+    for identifier in identifiers:
+        if identifier not in known:
+            session.add(AccountAlias(account_id=account.id, raw_identifier=identifier))
+    session.flush()
+    return account
+
+
 def seed_assets(session: Session, config: dict) -> dict:
     """Apply the config, then re-derive asset tags on already-uploaded rows. Caller commits."""
     assets = [_upsert_asset(session, spec) for spec in config.get("assets", [])]
     loans = [_upsert_loan(session, spec) for spec in config.get("loans", [])]
+    accounts = [_upsert_account(session, spec) for spec in config.get("accounts", [])]
     tagged = reattribute_assets(session)
-    return {"assets": len(assets), "loans": len(loans), "tagged": tagged}
+    return {"assets": len(assets), "loans": len(loans), "accounts": len(accounts), "tagged": tagged}

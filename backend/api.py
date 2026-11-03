@@ -23,10 +23,12 @@ from categorisation.rules import load_active_rules
 from categorisation.seed_rules import seed_rules_if_empty
 from categorisation.taxonomy import is_valid_category
 from ingestion.account_resolution import resolve_account
-from ingestion.nab_format import NabFormatError, parse_nab_format_with_report
+from ingestion.nab_format import NabFormatError
+from ingestion.statement_parser import parse_statement_with_report
 from transfers.listing import list_transfers
 from transfers.detection import (
     find_suggested_transfer_match,
+    is_lone_own_account_transfer,
     is_never_transfer,
     link_transfer_pair,
     process_freed_rows,
@@ -274,9 +276,9 @@ async def upload_transactions(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unable to read uploaded file: {exc}") from exc
 
     try:
-        parse_result = parse_nab_format_with_report(contents, filename=file.filename)
+        parse_result = parse_statement_with_report(contents, filename=file.filename)
     except NabFormatError as exc:
-        logger.warning("NAB format parse error: %s", exc)
+        logger.warning("Statement parse error: %s", exc)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     parsed_rows = parse_result.rows
@@ -298,7 +300,9 @@ async def upload_transactions(
             confidence, cat_needs_review, cat_review_reason = 1.0, False, None
         else:
             rule_match = match_rule(db, row.raw_description)
-            bank_derived = None if rule_match is not None else categorise_from_bank_category(row.raw_bank_category)
+            bank_derived = None if rule_match is not None else (
+                categorise_from_bank_category(row.raw_bank_category) or row.category_hint
+            )
             if rule_match is not None:
                 category, subcategory, confidence, cat_needs_review, cat_review_reason = (
                     rule_match.category, rule_match.subcategory, rule_match.confidence, False, None,
@@ -399,7 +403,10 @@ async def upload_transactions(
     # Two passes over the whole upload, so the order the rows arrive in cannot decide the outcome:
     # every account-number / reference match (Tier 1) first, then amount-and-date matches (Tier 2)
     # on whatever is left. Exact amounts only; see transfers/detection.py.
-    detectable = [tx for tx in saved_rows if tx.type != "Transfer" and not is_never_transfer(tx)]
+    detectable = [
+        tx for tx in saved_rows
+        if (tx.type != "Transfer" or is_lone_own_account_transfer(tx)) and not is_never_transfer(tx)
+    ]
     for tx in detectable:
         process_transfer_detection(db, tx, tiers=(1,))
     for tx in detectable:

@@ -15,12 +15,18 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from backend.models import Transaction, TransferGroup
+from backend.models import Account, Transaction, TransferGroup
 from backend.needs_review_reasons import TRANSFER_MATCH
 from categorisation.recategorise import place_unplaced_row
 from categorisation.rules import load_active_rules
 from transfers.card_payments import reclassify_card_payments
-from transfers.detection import is_never_transfer, process_freed_rows, process_transfer_detection
+from transfers.detection import (
+    is_lone_own_account_transfer,
+    is_macquarie_account,
+    is_never_transfer,
+    process_freed_rows,
+    process_transfer_detection,
+)
 from transfers.own_accounts import reclassify_own_account_transfers
 
 Restore = dict[int, tuple[Optional[str], Optional[str]]]
@@ -56,7 +62,17 @@ def rebuild_transfer_groups(session: Session, restore_categories: Optional[Resto
     # Text-decided transfers first, so a debit to Macquarie is never paired with something by coincidence.
     own_account = reclassify_own_account_transfers(session)
     # Same guard as the upload path: an ATO refund, rent credit or capital event is never made a Transfer.
-    ordered = sorted((t for t in freed if not is_never_transfer(t)), key=lambda t: (t.date, t.id))
+    # A debit to Macquarie typed by its text has no group either; like a freed row, it is searched for a
+    # partner (the Macquarie credit may already be imported), the same as it is on upload.
+    lone_macquarie = [
+        t for t in session.query(Transaction).filter(
+            Transaction.type == "Transfer", Transaction.transfer_group_id.is_(None),
+            Transaction.superseded_by_id.is_(None),
+        ) if is_lone_own_account_transfer(t)
+    ]
+    ordered = sorted(
+        (t for t in [*freed, *lone_macquarie] if not is_never_transfer(t)), key=lambda t: (t.date, t.id),
+    )
     for tx in ordered:
         process_transfer_detection(session, tx, tiers=(1,))
     for tx in ordered:
@@ -104,9 +120,13 @@ def missing_bank_category_share(session: Session) -> float:
     """
     The share of imported rows with no saved bank category. The bank-category check is a no-op for a row
     without one, so a rebuild before `scripts/backfill_bank_category.py` would quietly bring back the wrong
-    pairings it exists to remove.
+    pairings it exists to remove. Macquarie statements are left out: they carry no bank category by design, so
+    their rows are not evidence of a skipped backfill (add the NBA accounts here when that parser lands).
     """
+    macquarie_ids = [a.id for a in session.query(Account).all() if is_macquarie_account(a)]
     imported = session.query(Transaction).filter(Transaction.source == "bank_import")
+    if macquarie_ids:
+        imported = imported.filter(Transaction.account_id.notin_(macquarie_ids))
     total = imported.count()
     if total == 0:
         return 0.0

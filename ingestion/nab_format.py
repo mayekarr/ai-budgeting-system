@@ -53,9 +53,12 @@ class ParsedRow:
     # was also consulted by categorisation/bank_category.py -- categorise_from_bank_category() only
     # ever reads raw_bank_category, never this field).
     raw_merchant: Optional[str] = None
+    # A (category, subcategory) the statement format itself states unambiguously (Macquarie labels its own
+    # interest and dividend rows). Used only when no rule and no bank category applies; never a transfer signal.
+    category_hint: Optional[tuple[str, Optional[str]]] = None
 
 
-def _read_dataframe(raw_bytes: bytes, filename: str) -> pd.DataFrame:
+def read_dataframe(raw_bytes: bytes, filename: str) -> pd.DataFrame:
     buffer = io.BytesIO(raw_bytes)
     lower = filename.lower()
     try:
@@ -63,7 +66,7 @@ def _read_dataframe(raw_bytes: bytes, filename: str) -> pd.DataFrame:
             return pd.read_excel(buffer)
         return pd.read_csv(buffer)
     except Exception as exc:  # pylint: disable=broad-except
-        raise NabFormatError(f"Unable to read {filename} as a NAB-style export: {exc}") from exc
+        raise NabFormatError(f"Unable to read {filename} as a statement export: {exc}") from exc
 
 
 def _require_text(raw, lower_cols: dict, column: str, row_num: int) -> str:
@@ -97,7 +100,11 @@ def parse_nab_format(raw_bytes: bytes, *, filename: str) -> list[ParsedRow]:
 
 def parse_nab_format_with_report(raw_bytes: bytes, *, filename: str) -> ParseResult:
     """Like `parse_nab_format`, but also reports how many seam-repeat and $0 rows were left out."""
-    df = _read_dataframe(raw_bytes, filename)
+    return parse_nab_dataframe(read_dataframe(raw_bytes, filename))
+
+
+def parse_nab_dataframe(df: pd.DataFrame) -> ParseResult:
+    """The NAB-style parser on an already-read file, so a caller that sniffed the layout does not read it twice."""
     df.columns = [str(c).strip() for c in df.columns]
     lower_cols = {c.lower(): c for c in df.columns}
 

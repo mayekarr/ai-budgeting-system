@@ -9,8 +9,8 @@ setup and what's runnable today.
 
 ### Features (build increment 1 — J1, "upload a statement")
 
-- **Statement import**: upload a NAB-style bank statement CSV/xlsx via FastAPI (Macquarie-style and
-  headerless-CommBank-style formats are a fast-follow, not yet supported).
+- **Statement import**: upload a NAB-style or Macquarie-style bank statement CSV/xlsx via FastAPI; the
+  parser is chosen from the header row. The headerless CommBank-style NBA format is not yet supported.
 - **Account resolution**: maps a statement's raw account identifier to one of the user's `Account`
   records via `AccountAlias`, auto-creating and flagging unrecognised ones.
 - **Categorisation**: rule-based matching (seeded from real historical data) first, falling back to
@@ -48,6 +48,8 @@ ai-budgeting-system/
     api.py               # FastAPI app: /transactions/upload, /transactions
   ingestion/
     nab_format.py        # NAB-style statement parser
+    macquarie_format.py  # Macquarie-style parser (MAC, MACACC): Debit/Credit columns, no account number
+    statement_parser.py  # picks the parser from the header row
     account_resolution.py
   categorisation/
     taxonomy.py           # the 16-category merged taxonomy
@@ -135,6 +137,16 @@ The backend creates `finance.db` (SQLite) and seeds starter categorisation rules
 
     (`Category`/`Merchant Name` are the bank's own values — read as a detection signal only, never
     trusted as the output category; see `docs/product-requirements.md` §4.1.)
+
+  - A Macquarie export is accepted too (detected by its `Debit` and `Credit` columns):
+
+    ```csv
+    Transaction Date,Details,Account,Category,Subcategory,Tags,Notes,Debit,Credit,Balance,Original Description
+    ```
+
+    It has no account number, so the `Account` name is the identifier; register it (and the account
+    number) under `accounts` in `config/assets.local.json` and run `python -m scripts.seed_assets`.
+    The upload order of MAC and MACACC does not matter.
 
 - **GET `/transactions`**
 

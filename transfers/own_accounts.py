@@ -3,9 +3,10 @@ Money sent to one of the user's own accounts whose statements aren't imported ye
 
 Today that is the Macquarie account (MAC): a debit worded `JC to Macquarie`, `JC to Mac CMA`,
 `AC to MCA`, `Macquarie CM Acc` or `transfer to mac acc` is a move between the user's own accounts,
-so it is a `Transfer` by its text alone, with no counterpart row and no TransferGroup. When the MAC
-statements are imported, the credit side pairs with it through Tier-1 matching (a lone Transfer is
-still a candidate there).
+so it is a `Transfer` by its text alone, with no TransferGroup until a counterpart exists. When the MAC
+statements are imported, the credit side pairs with it by exact amount and date (Tier 2): a lone debit
+like this is the one groupless Transfer detection still searches for and offers as a partner
+(`transfers.detection.is_lone_own_account_transfer`), and its partner must sit on a Macquarie account.
 
 Only debits are matched: a credit worded `Macquarie ...` could be interest or a dividend.
 """
@@ -26,6 +27,17 @@ _MACQUARIE_RE = re.compile(
     r"|\bMacquarie\s+CM\s+Acc\b",
     re.IGNORECASE,
 )
+
+
+# The account holders' own names. They appear on both sides of a transfer between their accounts, so they
+# say nothing about whether two rows belong together (transfers/listing.py), and a payment that names one
+# of them is plausibly a move to their own account. This is a personal project for one household: edit
+# this list for a different one.
+HOUSEHOLD_NAMES = frozenset({"ROHAN", "ANILA", "MAYEKAR"})
+
+
+def names_a_household_member(raw_description: str) -> bool:
+    return any(w in HOUSEHOLD_NAMES for w in re.findall(r"[A-Za-z0-9]{2,}", raw_description.upper()))
 
 
 def is_own_account_transfer(raw_description: str, amount: float) -> bool:

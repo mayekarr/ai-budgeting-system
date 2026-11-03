@@ -35,6 +35,7 @@ from backend.models import Account, AccountAlias, Transaction, TransferGroup
 from categorisation.capital_events import capital_event_clause, is_capital_event
 from backend.needs_review_reasons import TRANSFER_MATCH, should_supersede
 from transfers.aliases import alias_matches_text
+from transfers.own_accounts import is_own_account_transfer, names_a_household_member
 
 _REFERENCE_TOKEN_RE = re.compile(r"\b[A-Za-z]{1,3}\d{6,}\b")
 _DATE_WINDOW = timedelta(days=3)
@@ -53,6 +54,8 @@ NON_TRANSFER_BANK_TYPES = frozenset({
     "CREDIT CARD PURCHASE", "PURCHASE AUTHORISATION", "CREDIT CARD REFUND", "FEES", "ATM DEBIT",
     "INTEREST PAID", "INTEREST CHARGED", "SALARY", "DIVIDEND", "REVERSAL CREDIT",
     "MISCELLANEOUS DEBIT", "DEPOSIT",
+    # Macquarie statements (ingestion/macquarie_format.py): a BPAY payment or direct debit goes to a third party.
+    "BPAY", "DIRECT DEBIT",
 })
 
 
@@ -89,6 +92,47 @@ def is_never_transfer(tx: Transaction) -> bool:
     if tx.category == "Income" and tx.subcategory in _NEVER_HEURISTIC_SUBCATEGORIES:
         return True
     return is_capital_event(tx.category, tx.subcategory)
+
+
+def is_lone_own_account_transfer(tx: Transaction) -> bool:
+    """
+    A debit to the user's Macquarie account that is typed Transfer by its text (transfers/own_accounts.py)
+    and has no pair yet. It is the one groupless Transfer still open to matching: once the Macquarie
+    statements are imported, the credit side is its counterpart. Every other groupless Transfer (a card
+    payment) is settled by its text and stays out of amount-and-date matching.
+    """
+    return (
+        tx.type == "Transfer" and tx.transfer_group_id is None
+        and is_own_account_transfer(tx.raw_description, tx.amount)
+    )
+
+
+def is_macquarie_account(account: Account) -> bool:
+    """An account whose name, institution or any statement alias names Macquarie (the MAC export names the account)."""
+    names = [account.name or "", account.institution or "", *(a.raw_identifier for a in account.aliases)]
+    return any("macquarie" in n.lower() for n in names)
+
+
+def _macquarie_pairing_allowed(tx_is_lone_debit: bool, tx: Transaction, row: Transaction) -> bool:
+    """
+    Amount-and-date pairing involving a Macquarie account:
+    - a debit worded as sent to Macquarie is completed only by a credit on a Macquarie account, never by an
+      equal amount elsewhere (a friend's repayment, a salary);
+    - two Macquarie accounts, or two non-Macquarie accounts, are unrestricted;
+    - a Macquarie account against any other account needs the other leg to read like a move to the household
+      (its text names one of them), so a third party's payment into MAC cannot pair with an equal payment the
+      user made to someone else that week. Every NAB leg of a real MAC pair so far read that way.
+    Only reached for a row that already matches on amount, so the account lookups stay rare.
+    """
+    if tx_is_lone_debit:
+        return is_macquarie_account(row.account)
+    if is_lone_own_account_transfer(row):
+        return is_macquarie_account(tx.account)
+    tx_macquarie, row_macquarie = is_macquarie_account(tx.account), is_macquarie_account(row.account)
+    if tx_macquarie == row_macquarie:
+        return True
+    other = row if tx_macquarie else tx
+    return names_a_household_member(other.raw_description)
 
 
 def _find_account_via_alias_in_text(session: Session, text: str, exclude_account_id: int) -> Optional[int]:
@@ -133,6 +177,37 @@ def _find_counterpart_via_reference_number(session: Session, tx: Transaction) ->
             # Prefer a free row over one that has to be taken back from a Tier-2 pairing.
             return min(available, key=lambda c: (c.transfer_group_id is not None, c.id))
     return None
+
+
+def _find_counterpart_via_alias_in_their_text(session: Session, tx: Transaction) -> Optional[Transaction]:
+    """
+    The mirror of `_find_counterpart_via_alias`: an earlier row on another account whose text names THIS row's
+    account number (a payment out saying where it went), for a row whose own text names nothing. Without it a
+    link made by account number would depend on which statement was uploaded first.
+    """
+    own_aliases = [
+        a.raw_identifier for a in session.query(AccountAlias).filter(AccountAlias.account_id == tx.account_id)
+    ]
+    if not own_aliases:
+        return None
+    candidates = (
+        session.query(Transaction)
+        .filter(
+            Transaction.id != tx.id,
+            Transaction.account_id != tx.account_id,
+            Transaction.amount == -tx.amount,
+            Transaction.date >= tx.date - _DATE_WINDOW,
+            Transaction.date <= tx.date + _DATE_WINDOW,
+        )
+        .all()
+    )
+    available = [
+        c for c in candidates
+        if _is_available(c) and any(alias_matches_text(alias, c.raw_description) for alias in own_aliases)
+    ]
+    if not available:
+        return None
+    return min(available, key=lambda c: (c.transfer_group_id is not None, abs((c.date - tx.date).days), c.id))
 
 
 def _find_counterpart_via_alias(session: Session, tx: Transaction) -> Optional[Transaction]:
@@ -289,9 +364,6 @@ def _find_tier2_candidates(session: Session, tx: Transaction) -> list[tuple[Tran
             # it would risk transfer-tagging a row that rollups already exclude, for a real-world
             # charge only the settled row represents.
             Transaction.superseded_by_id.is_(None),
-            # A groupless Transfer is already resolved (a loan drawdown/paydown typed from its
-            # text, transfers/loan_movements.py), so it is never a heuristic partner.
-            Transaction.type != "Transfer",
             # A candidate already linked into some other TransferGroup must not be pulled into a
             # new, unrelated one on pure amount/date coincidence — Tier 2 only ever proposes a
             # link between two rows that are BOTH still unresolved. (`tx` itself is guaranteed
@@ -320,12 +392,15 @@ def _find_tier2_candidates(session: Session, tx: Transaction) -> list[tuple[Tran
         )
         .all()
     )
+    tx_is_lone_debit = is_lone_own_account_transfer(tx)
     candidates = []
     for row in rows:
         if (
             not _amounts_exact_opposite(tx.amount, row.amount)
+            or (row.type == "Transfer" and not is_lone_own_account_transfer(row))
             or not can_be_transfer_leg(row)
             or not bank_category_allows_transfer(row)
+            or not _macquarie_pairing_allowed(tx_is_lone_debit, tx, row)
         ):
             continue
         candidates.append((row, _tier2_band(tx.date, row.date)))
@@ -357,10 +432,11 @@ def _tie_is_interchangeable(session: Session, tx: Transaction, candidates: list[
             Transaction.amount == tx.amount,
             Transaction.superseded_by_id.is_(None),
             Transaction.transfer_group_id.is_(None),
-            Transaction.type != "Transfer",
         )
         .all()
     )
+    # A lone debit to Macquarie is typed Transfer but is still waiting for its partner, so it counts.
+    equivalents = [e for e in equivalents if e.type != "Transfer" or is_lone_own_account_transfer(e)]
     # Count only rows that could really be this transfer's other leg: the same gates the candidates passed,
     # and not an ATO refund, rent or capital event, which detection never touches.
     equivalents = [
@@ -466,8 +542,8 @@ def process_transfer_detection(session: Session, tx: Transaction, tiers: tuple[i
     Leaves `type` untouched when neither tier finds a match, and never touches a row whose bank type
     says it is a purchase, fee, cash withdrawal and so on.
     """
-    if tx.type == "Transfer":
-        return  # already linked
+    if tx.type == "Transfer" and not is_lone_own_account_transfer(tx):
+        return  # already linked, or settled by its text
     if not can_be_transfer_leg(tx):
         return
 
@@ -475,6 +551,8 @@ def process_transfer_detection(session: Session, tx: Transaction, tiers: tuple[i
         counterpart = _find_counterpart_via_reference_number(session, tx)
         if counterpart is None:
             counterpart = _find_counterpart_via_alias(session, tx)
+        if counterpart is None:
+            counterpart = _find_counterpart_via_alias_in_their_text(session, tx)
         if counterpart is not None and link_transfer_pair(session, tx, counterpart, tier=1):
             return
 

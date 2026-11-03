@@ -139,3 +139,88 @@ def test_seed_moves_an_alias_that_changed_assets_in_the_config(session):
 def test_seed_rejects_a_blank_alias(session, pattern):
     with pytest.raises(ValueError, match="blank"):
         seed_assets(session, {"assets": [{"name": "X", "type": "Other", "aliases": [pattern]}]})
+
+
+# --- plain accounts (e.g. the Macquarie accounts, whose statements name no account number) -----------
+
+ACCOUNTS = {
+    "accounts": [
+        {"name": "Macquarie CMA", "institution": "Macquarie", "account_type": "Savings",
+         "aliases": ["Macquarie Cash Management Account"]},
+        {"name": "Macquarie Accelerator", "institution": "Macquarie", "account_type": "Savings",
+         "aliases": ["Macquarie Cash Management Accelerator Account", "000942290974"]},
+    ],
+}
+
+
+def test_seed_creates_accounts_with_all_their_aliases(session):
+    result = seed_assets(session, ACCOUNTS)
+    session.commit()
+
+    assert result["accounts"] == 2
+    accelerator = session.query(AccountAlias).filter_by(raw_identifier="000942290974").one().account
+    assert (accelerator.name, accelerator.institution, accelerator.account_type) == (
+        "Macquarie Accelerator", "Macquarie", "Savings")
+    assert {a.raw_identifier for a in accelerator.aliases} == {
+        "Macquarie Cash Management Accelerator Account", "000942290974"}
+
+
+def test_seed_accounts_is_idempotent(session):
+    seed_assets(session, ACCOUNTS)
+    session.commit()
+    seed_assets(session, ACCOUNTS)
+    session.commit()
+
+    assert session.query(Account).count() == 2
+    assert session.query(AccountAlias).count() == 3
+
+
+def test_seed_adopts_the_account_an_upload_already_auto_created(session):
+    # The first MAC upload creates an account named after the raw identifier; seeding renames it
+    # rather than leaving a second, empty account beside it.
+    auto = Account(name="Macquarie Cash Management Account")
+    session.add(auto)
+    session.flush()
+    session.add(AccountAlias(account_id=auto.id, raw_identifier="Macquarie Cash Management Account"))
+    session.commit()
+
+    seed_assets(session, ACCOUNTS)
+    session.commit()
+
+    assert session.query(Account).count() == 2
+    assert session.get(Account, auto.id).name == "Macquarie CMA"
+
+
+def test_seed_refuses_an_entry_whose_aliases_belong_to_two_different_accounts(session):
+    seed_assets(session, ACCOUNTS)
+    session.commit()
+    merged = {"accounts": [{"name": "Both", "aliases": [
+        "Macquarie Cash Management Account", "000942290974"]}]}
+
+    with pytest.raises(ValueError, match="different accounts"):
+        seed_assets(session, merged)
+
+
+def test_seed_tolerates_a_repeated_alias_in_one_entry(session):
+    entry = {"accounts": [{"name": "Macquarie Accelerator", "aliases": ["000942290974", "000942290974 "]}]}
+
+    seed_assets(session, entry)
+    session.commit()
+
+    assert session.query(AccountAlias).filter_by(raw_identifier="000942290974").count() == 1
+
+
+@pytest.mark.parametrize("aliases", [[], [" "]])
+def test_seed_refuses_an_account_with_no_usable_alias(session, aliases):
+    with pytest.raises(ValueError):
+        seed_assets(session, {"accounts": [{"name": "X", "aliases": aliases}]})
+
+
+def test_seed_refuses_to_adopt_a_loan_account_through_an_account_alias(session):
+    seed_assets(session, CONFIG)
+    session.commit()
+
+    with pytest.raises(ValueError, match="loan"):
+        seed_assets(session, {"accounts": [{"name": "Oops", "aliases": ["34-188-5257"]}]})
+
+    assert session.query(AccountAlias).filter_by(raw_identifier="34-188-5257").one().account.name == "Jericho Ct loan"

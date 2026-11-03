@@ -8,5 +8,9 @@
     {"number": "00-000-0001", "name": "Investment property loan", "asset": "Example Investment Property"},
     {"number": "00-000-0002", "name": "Share loan", "asset": "Example Share Portfolio"},
     {"number": "000000003", "name": "Home loan", "asset": "Example Home"}
+  ],
+  "accounts": [
+    {"name": "Example Savings", "institution": "Example Bank", "account_type": "Savings",
+     "aliases": ["Example Savings Account", "000000004"]}
   ]
 }

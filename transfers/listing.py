@@ -20,6 +20,7 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from backend.models import Account, Transaction, TransferGroup
+from transfers.own_accounts import HOUSEHOLD_NAMES
 
 
 # Words that say nothing about whether two rows are the same transfer.
@@ -28,9 +29,8 @@ _GENERIC_WORDS = frozenset({
     "ONLINE", "PAYMENT", "PAY",
 })
 # The account holders' own names appear on both sides of every transfer between their accounts, so they
-# say nothing about whether two rows belong together. This is a personal project for one household:
-# edit this list for a different one.
-_HOUSEHOLD_NAMES = frozenset({"ROHAN", "ANILA", "MAYEKAR"})
+# say nothing about whether two rows belong together (the list lives in transfers/own_accounts.py).
+_HOUSEHOLD_NAMES = HOUSEHOLD_NAMES
 # Only the card's own leg marks a card payment: AUTOMATIC DRAWING is also a monthly donation or instalment.
 _CARD_SIDE_TYPE = "CREDIT CARD PAYMENT"
 
