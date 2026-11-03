@@ -6,12 +6,13 @@ Usage (from the repo root, with the venv active):
 
 Does these idempotent things, in order, and prints how many rows each changed:
   1. adds any starter categorisation rule the database does not have yet;
-  2. applies the rules to rows still waiting on a category (Miscellaneous / review queue);
-  3. types still-unpaired card payments (DIRECT DEBIT PAYMENT, NAB CARD AUTOPAY) as Transfer, and
+  2. clears `transfer_match` review flags on rows in no pair with no current candidate;
+  3. applies the rules to rows still waiting on a category (Miscellaneous / review queue);
+  4. types still-unpaired card payments (DIRECT DEBIT PAYMENT, NAB CARD AUTOPAY) as Transfer, and
      tags loan drawdowns/paydowns and share-portfolio contributions as capital events;
-  4. types debits to the Macquarie account as Transfer;
-  5. re-pairs rows that lost their pair but still share a reference and an exact amount;
-  6. clears the stale category on final (Tier-1) Transfers.
+  5. types debits to the Macquarie account as Transfer;
+  6. re-pairs rows that lost their pair but still share a reference and an exact amount;
+  7. clears the stale category on final (Tier-1) Transfers.
 A re-run changes 0 rows. Back up finance.db first.
 """
 
@@ -27,12 +28,14 @@ from transfers.card_payments import reclassify_card_payments
 from transfers.cleanup import clear_transfer_categories
 from transfers.own_accounts import reclassify_own_account_transfers
 from transfers.repair import relink_by_reference
+from transfers.stale_flags import clear_stale_transfer_match_flags
 
 
 def main() -> int:
     create_tables()
     with session_scope() as session:
         print(f"rules added:                  {add_missing_seed_rules(session)}")
+        print(f"stale transfer flags cleared: {clear_stale_transfer_match_flags(session)}")
         print(f"rows recategorised:           {recategorise_unreviewed(session)}")
         print(f"card payments -> Transfer:    {reclassify_card_payments(session)}")
         print(f"capital events tagged:        {reclassify_capital_events(session)}")
