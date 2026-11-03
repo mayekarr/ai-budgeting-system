@@ -58,13 +58,14 @@ class ParsedRow:
     category_hint: Optional[tuple[str, Optional[str]]] = None
 
 
-def read_dataframe(raw_bytes: bytes, filename: str) -> pd.DataFrame:
+def read_dataframe(raw_bytes: bytes, filename: str, header: Optional[int] = 0) -> pd.DataFrame:
+    """Read a CSV/xlsx statement; `header=None` for a file whose first line is data (the headerless NBA export)."""
     buffer = io.BytesIO(raw_bytes)
     lower = filename.lower()
     try:
         if lower.endswith((".xlsx", ".xls")):
-            return pd.read_excel(buffer)
-        return pd.read_csv(buffer)
+            return pd.read_excel(buffer, header=header)
+        return pd.read_csv(buffer, header=header)
     except Exception as exc:  # pylint: disable=broad-except
         raise NabFormatError(f"Unable to read {filename} as a statement export: {exc}") from exc
 
@@ -91,6 +92,10 @@ class ParseResult:
     # $0 rows skipped: bank notices stored as transactions (rate changes, offset-arrangement
     # changes). They move no money and would only add noise to Needs Review.
     zero_amount_skipped: int = 0
+    # The bank a format that carries no bank Category column comes from ("Macquarie", "CommBank"); None for
+    # NAB. The upload stamps it on an account registered without an institution, because the rebuild guard
+    # recognises those formats by it (transfers.detection.carries_no_bank_category).
+    institution: Optional[str] = None
 
 
 def parse_nab_format(raw_bytes: bytes, *, filename: str) -> list[ParsedRow]:

@@ -215,6 +215,22 @@ def test_missing_bank_category_share_counts_only_imported_rows(session):
     assert missing_bank_category_share(session) == 0.25
 
 
+def test_missing_bank_category_share_ignores_commbank_rows_which_never_carry_one(session):
+    # The headerless NBA export has no category column either.
+    jc = _acct(session, "JC")
+    nba = Account(name="NBA", institution="CommBank")
+    session.add(nba)
+    session.flush()
+    for i in range(4):
+        session.add(Transaction(account_id=jc.id, date=date(2026, 1, 1 + i), amount=-1.0, raw_description=f"r{i}",
+                                source="bank_import", raw_bank_category="Groceries"))
+    for i in range(6):
+        session.add(Transaction(account_id=nba.id, date=date(2026, 2, 1 + i), amount=-1.0, raw_description=f"n{i}",
+                                source="bank_import"))
+    session.commit()
+    assert missing_bank_category_share(session) == 0.0
+
+
 def test_missing_bank_category_share_ignores_macquarie_rows_which_never_carry_one(session):
     # A Macquarie statement has no bank category by design, so those rows are not evidence of a skipped
     # backfill and must not push the share towards the point where the rebuild refuses to run.

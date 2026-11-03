@@ -40,7 +40,7 @@ from transfers.lone_transfers import mark_as_lone_transfer
 from transfers.refunds import detect_refund
 
 from .database import SessionLocal, bulk_save_transactions, create_tables, engine  # noqa: F401  (engine kept for test monkeypatching)
-from .models import Account, Asset, CategorisationRule, Transaction
+from .models import Account, AccountAlias, Asset, CategorisationRule, Transaction
 from .needs_review_reasons import (
     LLM_UNAVAILABLE,
     LOW_CONFIDENCE_CATEGORY,
@@ -262,10 +262,13 @@ def get_session() -> Generator[Session, None, None]:
 @app.post("/transactions/upload", status_code=status.HTTP_201_CREATED, response_model=UploadResult)
 async def upload_transactions(
     file: UploadFile = File(...),
+    account: Optional[str] = Query(
+        None, description="Account name or alias, required only for a file with no header row or account column (the NBA export)."
+    ),
     db: Session = Depends(get_session),
 ) -> UploadResult:
     """
-    Upload a NAB-style bank statement. Parses, resolves the account, categorises (rule then Claude
+    Upload a bank statement (NAB-style, Macquarie, or the headerless CommBank export). Parses, resolves the account, categorises (rule then Claude
     API fallback), detects transfers/refunds, and persists — skipping duplicates (FR-3).
     """
     logger.info("Received upload request: filename=%s", file.filename)
@@ -275,11 +278,32 @@ async def upload_transactions(
         logger.exception("Unable to read uploaded file.")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unable to read uploaded file: {exc}") from exc
 
+    # An account named by the caller (a file with no account column) is matched to a registered alias, ignoring
+    # case. Resolve_account would auto-create any unknown identifier, which is right for one read from a file
+    # but wrong for one typed by hand: a typo must be refused, not become a new account.
+    caller_account = account.strip() if account is not None and account.strip() else None
+    caller_account_known = False
+    if caller_account is not None:
+        registered = (
+            db.query(AccountAlias).filter(func.lower(AccountAlias.raw_identifier) == caller_account.lower()).first()
+        )
+        if registered is not None:
+            caller_account, caller_account_known = registered.raw_identifier, True
+
     try:
-        parse_result = parse_statement_with_report(contents, filename=file.filename)
+        parse_result = parse_statement_with_report(contents, filename=file.filename, account=caller_account)
     except NabFormatError as exc:
         logger.warning("Statement parse error: %s", exc)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    if caller_account is not None and not caller_account_known and any(
+        r.account_identifier == caller_account for r in parse_result.rows
+    ):
+        known_names = ", ".join(sorted(name for (name,) in db.query(Account.name)))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown account {caller_account!r}; known accounts: {known_names}.",
+        )
 
     parsed_rows = parse_result.rows
     seam_repeats_dropped = parse_result.seam_repeats_dropped
@@ -290,6 +314,8 @@ async def upload_transactions(
     to_persist = []
     for row in parsed_rows:
         resolved = resolve_account(db, row.account_identifier)
+        if parse_result.institution and resolved.account.institution is None:
+            resolved.account.institution = parse_result.institution
 
         # A loan drawdown/paydown or a share-portfolio contribution is decided by its text alone
         # (the loan/MLC statements aren't imported, so nothing can pair with it). Deciding that first

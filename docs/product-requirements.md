@@ -82,7 +82,7 @@ distinct raw export shapes** — ingestion must support all three, not just one:
 |---|---|---|
 | NAB-style | CC (credit card), JC (joint classic, Rohan+Anila), RC (Rohan's classic), AC (Anila's classic) | `Date`, `Amount` (signed), `Account Number`, `Transaction Type`, `Transaction Details`, `Balance`, `Category`, `Merchant Name`, `Processed On` |
 | Macquarie-style | MAC (Cash Management Account), MACACC (its higher-interest Accelerator sub-account) | `Transaction Date`, `Details`, `Account`, `Category`, `Subcategory`, `Tags`, `Notes`, `Debit`, `Credit` (split, not signed), `Balance`, `Original Description` |
-| Headerless CommBank-style | NBA (receives Rohan's payroll, forwards a fixed tranche to RC) | No header row at all: `Date`, `Amount`, `Description`, `Balance` only — ingestion needs a headerless-CSV mode, not just flexible header matching |
+| Headerless CommBank-style | NBA (receives Rohan's payroll, forwards a fixed tranche to RC) | No header row at all: `Date`, `Amount`, `Description`, `Balance` only — ingestion needs a headerless-CSV mode, not just flexible header matching. ~~Not built~~ — **Done** 2026-11-03: `ingestion/commbank_format.py`; the file names no account, so the upload takes an `account` parameter |
 
 `Account Number`/`Account` values seen: `Card ending NNNN` / masked `453030xxxxxx7128` (CC, two
 formats for the same linked relationship, per the original finding below), plain numeric account

@@ -148,4 +148,5 @@ def parse_macquarie_dataframe(df: pd.DataFrame) -> ParseResult:
     non_zero = [r for r in kept if r.amount != 0]
     return ParseResult(
         rows=non_zero, seam_repeats_dropped=len(dropped), zero_amount_skipped=len(kept) - len(non_zero),
+        institution="Macquarie",
     )

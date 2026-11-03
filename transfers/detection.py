@@ -113,6 +113,15 @@ def is_macquarie_account(account: Account) -> bool:
     return any("macquarie" in n.lower() for n in names)
 
 
+def carries_no_bank_category(account: Account) -> bool:
+    """
+    An account whose statement format has no bank Category column by design (Macquarie, and the headerless
+    CommBank NBA export), so its rows are never evidence of a skipped backfill.
+    """
+    names = [account.name or "", account.institution or "", *(a.raw_identifier for a in account.aliases)]
+    return is_macquarie_account(account) or any("commbank" in n.lower() for n in names)
+
+
 def _macquarie_pairing_allowed(tx_is_lone_debit: bool, tx: Transaction, row: Transaction) -> bool:
     """
     Amount-and-date pairing involving a Macquarie account:

@@ -9,8 +9,9 @@ setup and what's runnable today.
 
 ### Features (build increment 1 — J1, "upload a statement")
 
-- **Statement import**: upload a NAB-style or Macquarie-style bank statement CSV/xlsx via FastAPI; the
-  parser is chosen from the header row. The headerless CommBank-style NBA format is not yet supported.
+- **Statement import**: upload a NAB-style, Macquarie-style or headerless CommBank-style (NBA) bank
+  statement CSV/xlsx via FastAPI; the parser is chosen from the file's layout. The NBA file has no header
+  and no account column, so it is uploaded with `?account=<account name or alias>`.
 - **Account resolution**: maps a statement's raw account identifier to one of the user's `Account`
   records via `AccountAlias`, auto-creating and flagging unrecognised ones.
 - **Categorisation**: rule-based matching (seeded from real historical data) first, falling back to
@@ -49,7 +50,8 @@ ai-budgeting-system/
   ingestion/
     nab_format.py        # NAB-style statement parser
     macquarie_format.py  # Macquarie-style parser (MAC, MACACC): Debit/Credit columns, no account number
-    statement_parser.py  # picks the parser from the header row
+    commbank_format.py   # headerless CommBank-style parser (NBA): date, amount, description, balance
+    statement_parser.py  # picks the parser from the file's layout
     account_resolution.py
   categorisation/
     taxonomy.py           # the 16-category merged taxonomy
@@ -147,6 +149,10 @@ The backend creates `finance.db` (SQLite) and seeds starter categorisation rules
     It has no account number, so the `Account` name is the identifier; register it (and the account
     number) under `accounts` in `config/assets.local.json` and run `python -m scripts.seed_assets`.
     The upload order of MAC and MACACC does not matter.
+
+  - The headerless NBA export (four columns: date, amount, description, balance) is accepted when the
+    request names its account, for example `POST /transactions/upload?account=NBA`. Register the account
+    and the alias `NBA` under `accounts` in `config/assets.local.json` first.
 
 - **GET `/transactions`**
 

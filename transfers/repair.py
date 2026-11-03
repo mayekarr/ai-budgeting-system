@@ -22,7 +22,7 @@ from categorisation.rules import load_active_rules
 from transfers.card_payments import reclassify_card_payments
 from transfers.detection import (
     is_lone_own_account_transfer,
-    is_macquarie_account,
+    carries_no_bank_category,
     is_never_transfer,
     process_freed_rows,
     process_transfer_detection,
@@ -120,13 +120,13 @@ def missing_bank_category_share(session: Session) -> float:
     """
     The share of imported rows with no saved bank category. The bank-category check is a no-op for a row
     without one, so a rebuild before `scripts/backfill_bank_category.py` would quietly bring back the wrong
-    pairings it exists to remove. Macquarie statements are left out: they carry no bank category by design, so
-    their rows are not evidence of a skipped backfill (add the NBA accounts here when that parser lands).
+    pairings it exists to remove. Macquarie and CommBank (NBA) statements are left out: they carry no bank
+    category by design, so their rows are not evidence of a skipped backfill.
     """
-    macquarie_ids = [a.id for a in session.query(Account).all() if is_macquarie_account(a)]
+    exempt_ids = [a.id for a in session.query(Account).all() if carries_no_bank_category(a)]
     imported = session.query(Transaction).filter(Transaction.source == "bank_import")
-    if macquarie_ids:
-        imported = imported.filter(Transaction.account_id.notin_(macquarie_ids))
+    if exempt_ids:
+        imported = imported.filter(Transaction.account_id.notin_(exempt_ids))
     total = imported.count()
     if total == 0:
         return 0.0

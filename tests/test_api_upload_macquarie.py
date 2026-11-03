@@ -91,6 +91,20 @@ def test_a_macquarie_file_uploads_and_lands_on_its_registered_account(client):
         assert db.get(Account, row.account_id).name == "Macquarie CMA"
 
 
+def test_an_account_registered_without_an_institution_gets_macquarie_from_the_file(client):
+    with api_module.SessionLocal() as db:
+        account = Account(name="MAC")
+        db.add(account)
+        db.flush()
+        db.add(AccountAlias(account_id=account.id, raw_identifier=CMA))
+        db.commit()
+
+    _upload(client, MAC_CREDIT)
+
+    with api_module.SessionLocal() as db:
+        assert db.query(Account).filter_by(name="MAC").one().institution == "Macquarie"
+
+
 def test_an_unregistered_macquarie_account_is_created_and_flagged(client):
     _upload(client, MAC_CREDIT)
 
